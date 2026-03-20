@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { Capacitor } from '@capacitor/core'
 import { SpeechRecognition as NativeSpeechRecognition } from '@capacitor-community/speech-recognition'
-import { PenLine, X, Loader2, Save, Mic, List, AlertCircle, Lightbulb, CheckSquare, Clock, Edit2, Eye } from 'lucide-react'
+import { PenLine, X, Loader2, Save, Mic, List, AlertCircle, Lightbulb, CheckSquare, Clock, Edit2, Eye, Volume2, Square } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { saveTopicNotes } from '@/lib/actions'
 import { toast } from 'sonner'
@@ -11,6 +11,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
 import CodeBlock, { cleanCodeContent, parseMermaidTitle, parseMermaidDescription } from './CodeBlock'
+import { buildSpeechIndexMap, extractSpeechTextFromContainer, isSpeechSynthesisSupported, normalizeTextForSpeech, playSpeechWithInlineHighlight, stopSpeechSynthesis } from '@/lib/speech'
 
 const FENCED_BLOCK_REGEX = /```([^\n`]*)\n([\s\S]*?)```/g
 
@@ -225,10 +226,13 @@ export default function StickyNoteWidget({ initialNotes = '', topicId, topicTitl
   const [isRecording, setIsRecording] = useState(false)
   const [isPreparingMic, setIsPreparingMic] = useState(false)
   const [hasSpeechSupport, setHasSpeechSupport] = useState(false)
+  const [hasSpeechPlaybackSupport, setHasSpeechPlaybackSupport] = useState(false)
+  const [isSpeaking, setIsSpeaking] = useState(false)
   const [isPreview, setIsPreview] = useState(false)
   const [expandedRawBlocks, setExpandedRawBlocks] = useState({})
   const recognitionRef = useRef(null)
   const textareaRef = useRef(null)
+  const previewContainerRef = useRef(null)
   const segmentedTextareaRefs = useRef({})
   const shouldKeepRecordingRef = useRef(false)
   const recordingTimeoutRef = useRef(null)
@@ -239,6 +243,9 @@ export default function StickyNoteWidget({ initialNotes = '', topicId, topicTitl
   const insertAtCursorRef = useRef(null)
   const nativeSpeechSessionRef = useRef(0)
   const nativeSpeechCancelledRef = useRef(false)
+  const speechPlaybackRef = useRef(null)
+  const pendingSpeechStartRef = useRef(false)
+  const previewModeBeforeSpeechRef = useRef(false)
   const editorSegments = createEditorSegments(notes)
   const hasMaskedBlocks = editorSegments.some((segment) => segment.type === 'block')
 
@@ -282,6 +289,98 @@ export default function StickyNoteWidget({ initialNotes = '', topicId, topicTitl
       setSaveStatus('saved')
     }
   }, [initialNotes])
+
+  useEffect(() => {
+    setHasSpeechPlaybackSupport(isSpeechSynthesisSupported())
+
+    return () => {
+      speechPlaybackRef.current?.stop?.()
+      stopSpeechSynthesis()
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!isOpen && isSpeaking) {
+      pendingSpeechStartRef.current = false
+      speechPlaybackRef.current?.stop?.()
+      speechPlaybackRef.current = null
+      setIsSpeaking(false)
+      if (!previewModeBeforeSpeechRef.current) {
+        setIsPreview(false)
+      }
+    }
+  }, [isOpen, isSpeaking])
+
+  useEffect(() => {
+    if (!isSpeaking) {
+      pendingSpeechStartRef.current = false
+      speechPlaybackRef.current?.stop?.()
+      speechPlaybackRef.current = null
+      return
+    }
+
+    if (!isPreview || !previewContainerRef.current || speechPlaybackRef.current || !pendingSpeechStartRef.current) {
+      return
+    }
+
+    let cancelled = false
+    const frameId = window.requestAnimationFrame(() => {
+      if (cancelled || !previewContainerRef.current) {
+        return
+      }
+
+      const previewRawText = extractSpeechTextFromContainer(previewContainerRef.current)
+      const previewPayload = previewRawText
+        ? buildSpeechIndexMap(previewRawText)
+        : { text: normalizeTextForSpeech(notes) }
+
+      if (!previewPayload.text) {
+        pendingSpeechStartRef.current = false
+        setIsSpeaking(false)
+        toast.error('There are no notes to read aloud.')
+        if (!previewModeBeforeSpeechRef.current) {
+          setIsPreview(false)
+        }
+        return
+      }
+
+      pendingSpeechStartRef.current = false
+      speechPlaybackRef.current = playSpeechWithInlineHighlight(previewPayload.text, {
+        container: previewContainerRef.current,
+        onEnd: () => {
+          speechPlaybackRef.current = null
+          setIsSpeaking(false)
+          if (!previewModeBeforeSpeechRef.current) {
+            setIsPreview(false)
+          }
+        },
+        onStop: () => {
+          speechPlaybackRef.current = null
+        },
+        onError: (error) => {
+          speechPlaybackRef.current = null
+          setIsSpeaking(false)
+          toast.error(String(error?.message || error || 'Could not play the audio for these notes.'))
+          if (!previewModeBeforeSpeechRef.current) {
+            setIsPreview(false)
+          }
+        }
+      })
+
+      if (!speechPlaybackRef.current) {
+        setIsSpeaking(false)
+        toast.error('Could not play the audio for these notes.')
+        if (!previewModeBeforeSpeechRef.current) {
+          setIsPreview(false)
+        }
+      }
+    })
+
+    return () => {
+      cancelled = true
+      window.cancelAnimationFrame(frameId)
+    }
+  }, [isPreview, isSpeaking, notes])
 
   const updateNotesFromSegments = useCallback((segments) => {
     setNotes(stringifyNoteSegments(segments))
@@ -787,6 +886,41 @@ export default function StickyNoteWidget({ initialNotes = '', topicId, topicTitl
     }
   }
 
+  const toggleSpeechPlayback = useCallback(() => {
+    if (!hasSpeechPlaybackSupport) {
+      toast.error('Text-to-speech is not supported in this browser.')
+      return
+    }
+
+    if (isSpeaking) {
+      pendingSpeechStartRef.current = false
+      speechPlaybackRef.current?.stop?.()
+      speechPlaybackRef.current = null
+      setIsSpeaking(false)
+      if (!previewModeBeforeSpeechRef.current) {
+        setIsPreview(false)
+      }
+      return
+    }
+
+    const previewRawText = extractSpeechTextFromContainer(previewContainerRef.current)
+    const previewPayload = previewRawText
+      ? buildSpeechIndexMap(previewRawText)
+      : { text: normalizeTextForSpeech(notes) }
+
+    if (!previewPayload.text) {
+      toast.error('There are no notes to read aloud.')
+      return
+    }
+
+    previewModeBeforeSpeechRef.current = isPreview
+    pendingSpeechStartRef.current = true
+    if (!isPreview) {
+      setIsPreview(true)
+    }
+    setIsSpeaking(true)
+  }, [hasSpeechPlaybackSupport, isPreview, isSpeaking, notes])
+
   const insertAtCursor = (text) => {
     if (!hasMaskedBlocks) {
       const textarea = textareaRef.current
@@ -867,6 +1001,7 @@ export default function StickyNoteWidget({ initialNotes = '', topicId, topicTitl
       )}
 
       {isOpen && (
+        <>
         <div className="fixed inset-x-0 bottom-0 md:inset-x-auto md:bottom-8 md:right-8 h-[70vh] md:h-[min(60vh,450px)] w-full md:w-[400px] z-[110] flex flex-col overflow-hidden rounded-t-2xl md:rounded-xl border border-slate-200/50 shadow-2xl animate-in slide-in-from-bottom-5 fade-in duration-300 dark:border-slate-700/50">
           <div className="z-10 flex items-center justify-between border-b border-slate-200/80 bg-slate-100 px-4 py-3 text-slate-800 shadow-sm dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100">
             <div className="flex items-center gap-2 font-semibold text-blue-600 dark:text-blue-400">
@@ -932,6 +1067,21 @@ export default function StickyNoteWidget({ initialNotes = '', topicId, topicTitl
             )}
 
             <div className="ml-1 flex shrink-0 items-center gap-1">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={toggleSpeechPlayback}
+                disabled={!hasSpeechPlaybackSupport}
+                className={`h-7 w-7 rounded ${
+                  isSpeaking
+                    ? 'bg-emerald-500/20 text-emerald-600 hover:bg-emerald-500/30 dark:text-emerald-400'
+                    : 'text-slate-600 hover:bg-blue-100 dark:text-slate-300 dark:hover:bg-blue-900/30'
+                } ${!hasSpeechPlaybackSupport ? 'cursor-not-allowed opacity-60' : ''}`}
+                title={isSpeaking ? 'Stop Reading Notes' : 'Read Notes Aloud'}
+              >
+                {isSpeaking ? <Square className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}
+              </Button>
+
               {!isPreview && (
                 <Button
                   variant="ghost"
@@ -973,7 +1123,7 @@ export default function StickyNoteWidget({ initialNotes = '', topicId, topicTitl
 
           <div className="relative flex flex-1 flex-col overflow-hidden bg-white dark:bg-[#1a1c23]">
             {isPreview ? (
-              <div className="prose max-w-none flex-1 overflow-x-hidden overflow-y-auto break-words p-5 text-sm leading-relaxed scroll-smooth prose-p:text-slate-700 prose-headings:text-slate-800 prose-a:text-blue-600 dark:prose-invert dark:prose-p:text-slate-300 dark:prose-headings:text-slate-100 dark:prose-a:text-blue-400" style={{ fontFamily: "'Virgil', cursive" }}>
+              <div ref={previewContainerRef} className="prose max-w-none flex-1 overflow-x-hidden overflow-y-auto break-words p-5 text-sm leading-relaxed scroll-smooth prose-p:text-slate-700 prose-headings:text-slate-800 prose-a:text-blue-600 dark:prose-invert dark:prose-p:text-slate-300 dark:prose-headings:text-slate-100 dark:prose-a:text-blue-400" style={{ fontFamily: "'Virgil', cursive" }}>
                 {notes ? (
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm, remarkBreaks]}
@@ -1113,8 +1263,9 @@ export default function StickyNoteWidget({ initialNotes = '', topicId, topicTitl
             )}
           </div>
 
-          <div className="pointer-events-none absolute bottom-0 right-0 h-8 w-8 rounded-tl-xl bg-gradient-to-tl from-slate-200/50 to-transparent dark:from-slate-800/80" />
+        <div className="pointer-events-none absolute bottom-0 right-0 h-8 w-8 rounded-tl-xl bg-gradient-to-tl from-slate-200/50 to-transparent dark:from-slate-800/80" />
         </div>
+        </>
       )}
     </>
   )

@@ -14,7 +14,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Sheet, SheetContent, SheetTrigger, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
-import { Plus, ArrowLeft, Network, BookOpen, Settings, Trash2, Sparkles, Play, RotateCw, Home, Pencil, Share2, Copy, Check, Globe, Lock, Menu, MoreVertical, Download } from 'lucide-react'
+import { Plus, ArrowLeft, Network, BookOpen, Settings, Trash2, Sparkles, Play, RotateCw, Home, Pencil, Share2, Copy, Check, Globe, Lock, Menu, MoreVertical, Download, Volume2, Square } from 'lucide-react'
 import { toast } from 'sonner'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -32,6 +32,7 @@ import { getWeakTopics, getStudyTimeByWeek } from '@/lib/analytics'
 import WeakTopicsWidget from '@/components/WeakTopicsWidget'
 import { Switch } from '@/components/ui/switch'
 import { ThemeToggle } from '@/components/sub-components/theme-toggle'
+import { buildSpeechIndexMap, extractSpeechTextFromContainer, isSpeechSynthesisSupported, normalizeTextForSpeech, playSpeechWithInlineHighlight, stopSpeechSynthesis } from '@/lib/speech'
 
 function buildSafeFilename(title, suffix, extension) {
   const base = (title || 'learnify')
@@ -532,6 +533,53 @@ export default function SubjectPage() {
   const [updatedSubject, setUpdatedSubject] = useState({ title: '', description: '', syllabus: '' })
   
   const [isCopied, setIsCopied] = useState(false)
+  const [hasSpeechPlaybackSupport, setHasSpeechPlaybackSupport] = useState(false)
+  const [speakingTarget, setSpeakingTarget] = useState(null)
+  const compiledNotesContentRef = useRef(null)
+  const cheatSheetContentRef = useRef(null)
+  const noteContentRefs = useRef({})
+  const speechRequestRef = useRef(null)
+  const speechPlaybackRef = useRef(null)
+
+  useEffect(() => {
+    setHasSpeechPlaybackSupport(isSpeechSynthesisSupported())
+
+    return () => {
+      speechPlaybackRef.current?.stop?.()
+      stopSpeechSynthesis()
+    }
+  }, [])
+
+  const getContainerSpeechPayload = (container, fallbackText = '') => {
+    const rawText = extractSpeechTextFromContainer(container)
+
+    if (rawText) {
+      const { text } = buildSpeechIndexMap(rawText)
+      return {
+        text
+      }
+    }
+
+    return {
+      text: normalizeTextForSpeech(fallbackText)
+    }
+  }
+
+  const getCompiledNotesFallbackText = () => {
+    return topics
+      .filter((topic) => topic.user_notes && topic.user_notes.trim().length > 0)
+      .map((topic) => `${topic.title || 'Note'}. ${normalizeTextForSpeech(topic.user_notes)}`)
+      .join(' ')
+      .trim()
+  }
+
+  const getCompiledNotesSpeechPayload = () => {
+    const { text } = getContainerSpeechPayload(compiledNotesContentRef.current, getCompiledNotesFallbackText())
+
+    return {
+      text
+    }
+  }
 
   const handleDownloadNotes = async () => {
     const topicsWithNotes = topics.filter(t => t.user_notes && t.user_notes.trim().length > 0)
@@ -557,6 +605,91 @@ export default function SubjectPage() {
       console.error('Notes export error:', error)
       toast.error('Failed to export notes.')
     }
+  }
+
+  useEffect(() => {
+    if (!speakingTarget) {
+      speechPlaybackRef.current?.stop?.()
+      speechPlaybackRef.current = null
+      return
+    }
+
+    const speechRequest = speechRequestRef.current
+    if (!speechRequest || speechRequest.targetKey !== speakingTarget) {
+      return
+    }
+
+    let cancelled = false
+    const frameId = window.requestAnimationFrame(() => {
+      if (cancelled) {
+        return
+      }
+
+      const container = speechRequest.getContainer?.() || null
+      speechPlaybackRef.current?.stop?.()
+      speechPlaybackRef.current = playSpeechWithInlineHighlight(speechRequest.text, {
+        container,
+        onEnd: () => {
+          speechPlaybackRef.current = null
+          speechRequestRef.current = null
+          setSpeakingTarget(null)
+        },
+        onStop: () => {
+          speechPlaybackRef.current = null
+        },
+        onError: (error) => {
+          speechPlaybackRef.current = null
+          speechRequestRef.current = null
+          setSpeakingTarget(null)
+          toast.error(String(error?.message || error || 'Could not play the audio for this content.'))
+        }
+      })
+
+      if (!speechPlaybackRef.current) {
+        speechRequestRef.current = null
+        setSpeakingTarget(null)
+        toast.error('Could not play the audio for this content.')
+      }
+    })
+
+    return () => {
+      cancelled = true
+      window.cancelAnimationFrame(frameId)
+      speechPlaybackRef.current?.stop?.()
+      speechPlaybackRef.current = null
+    }
+  }, [speakingTarget])
+
+  const handleToggleSpeech = (targetKey, payloadBuilder, emptyMessage, getContainer = null) => {
+    if (!hasSpeechPlaybackSupport) {
+      toast.error('Text-to-speech is not supported in this browser.')
+      return
+    }
+
+    if (speakingTarget === targetKey) {
+      speechRequestRef.current = null
+      speechPlaybackRef.current?.stop?.()
+      speechPlaybackRef.current = null
+      setSpeakingTarget(null)
+      return
+    }
+
+    const payload = typeof payloadBuilder === 'function'
+      ? payloadBuilder()
+      : { text: String(payloadBuilder || '') }
+
+    const spokenText = normalizeTextForSpeech(payload.text)
+    if (!spokenText) {
+      toast.error(emptyMessage)
+      return
+    }
+
+    speechRequestRef.current = {
+      targetKey,
+      text: spokenText,
+      getContainer
+    }
+    setSpeakingTarget(targetKey)
   }
 
   const [isGeneratingCheatSheet, setIsGeneratingCheatSheet] = useState(false)
@@ -1622,9 +1755,25 @@ export default function SubjectPage() {
                      <h2 className="text-2xl font-bold tracking-tight">Compiled Notes</h2>
                      <p className="text-muted-foreground text-sm">All the sticky notes you&apos;ve taken across this subject&apos;s topics.</p>
                    </div>
-                   <Button onClick={handleDownloadNotes} variant="outline" className="glass hover:bg-white/5 shrink-0 w-full sm:w-auto">
-                     <Download className="mr-2 h-4 w-4" /> Download .md
-                   </Button>
+                   <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+                     <Button
+                       onClick={() => handleToggleSpeech(
+                         'subject-notes',
+                         () => getCompiledNotesSpeechPayload(),
+                         'There are no notes to read aloud.',
+                         () => compiledNotesContentRef.current
+                       )}
+                       variant="outline"
+                       className="glass hover:bg-white/5 shrink-0 w-full sm:w-auto"
+                       disabled={!hasSpeechPlaybackSupport}
+                     >
+                       {speakingTarget === 'subject-notes' ? <Square className="mr-2 h-4 w-4" /> : <Volume2 className="mr-2 h-4 w-4" />}
+                       {speakingTarget === 'subject-notes' ? 'Stop Audio' : 'Listen Notes'}
+                     </Button>
+                     <Button onClick={handleDownloadNotes} variant="outline" className="glass hover:bg-white/5 shrink-0 w-full sm:w-auto">
+                       <Download className="mr-2 h-4 w-4" /> Download .md
+                     </Button>
+                   </div>
                 </div>
 
                 <div className="flex-1 space-y-8">
@@ -1639,7 +1788,7 @@ export default function SubjectPage() {
                          </p>
                       </div>
                    ) : (
-                     <div className="space-y-6">
+                     <div ref={compiledNotesContentRef} className="space-y-6">
                         {topics
                           .filter(t => t.user_notes && t.user_notes.trim().length > 0)
                           .map((topic, index) => {
@@ -1661,23 +1810,53 @@ export default function SubjectPage() {
                                     <h3 className={`font-bold text-lg flex items-center gap-2 ${theme.title}`}>
                                        {topic.title}
                                     </h3>
-                                    <Button 
-                                      variant="ghost" 
-                                      size="sm" 
-                                      className="h-8 text-xs hover:bg-white/10"
-                                      onClick={() => router.push(`/learn/${topic.id}`)}
-                                    >
-                                      Go to Topic <ArrowLeft className="w-3 h-3 ml-2 rotate-180" />
-                                    </Button>
+                                    <div className="flex items-center gap-2" data-speech-ignore="true">
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-8 w-8 hover:bg-white/10"
+                                        onClick={() => handleToggleSpeech(
+                                         `note-${topic.id}`,
+                                         () => {
+                                            const payload = getContainerSpeechPayload(noteContentRefs.current[topic.id], topic.user_notes)
+                                            return { text: payload.text }
+                                          },
+                                          'There is no note content to read aloud.',
+                                          () => noteContentRefs.current[topic.id]
+                                        )}
+                                        disabled={!hasSpeechPlaybackSupport}
+                                        title={speakingTarget === `note-${topic.id}` ? 'Stop Reading Note' : 'Read Note Aloud'}
+                                      >
+                                        {speakingTarget === `note-${topic.id}` ? <Square className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+                                      </Button>
+                                      <Button 
+                                        variant="ghost" 
+                                        size="sm" 
+                                        className="h-8 text-xs hover:bg-white/10"
+                                        onClick={() => router.push(`/learn/${topic.id}`)}
+                                      >
+                                        Go to Topic <ArrowLeft className="w-3 h-3 ml-2 rotate-180" />
+                                      </Button>
+                                    </div>
                                   </div>
 
                                    <div className="prose dark:prose-invert prose-p:text-slate-700 dark:prose-p:text-slate-300 prose-headings:text-slate-800 dark:prose-headings:text-slate-100 max-w-none text-sm leading-relaxed" style={{ fontFamily: "'Virgil', cursive" }}>
+                                   <div
+                                     ref={(node) => {
+                                       if (node) {
+                                         noteContentRefs.current[topic.id] = node
+                                       } else {
+                                         delete noteContentRefs.current[topic.id]
+                                       }
+                                     }}
+                                   >
                                        <ReactMarkdown 
                                             remarkPlugins={[remarkGfm]}
                                             components={noteMarkdownComponents}
                                          >
                                              {topic.user_notes}
                                          </ReactMarkdown>
+                                   </div>
                                   </div>
                                </div>
                             )
@@ -1699,6 +1878,23 @@ export default function SubjectPage() {
                  </div>
                  {subject?.cheat_sheet && (
                    <div className="flex gap-2 w-full sm:w-auto">
+                     <Button
+                        onClick={() => handleToggleSpeech(
+                          'cheat-sheet',
+                         () => {
+                          const payload = getContainerSpeechPayload(cheatSheetContentRef.current, sanitizeLatex(subject.cheat_sheet))
+                          return { text: payload.text }
+                         },
+                         'There is no cheat sheet content to read aloud.',
+                         () => cheatSheetContentRef.current
+                       )}
+                       variant="outline"
+                       className="glass hover:bg-white/5 flex-1 sm:flex-initial"
+                       disabled={!hasSpeechPlaybackSupport}
+                     >
+                       {speakingTarget === 'cheat-sheet' ? <Square className="mr-2 h-4 w-4" /> : <Volume2 className="mr-2 h-4 w-4" />}
+                       {speakingTarget === 'cheat-sheet' ? 'Stop Audio' : 'Listen'}
+                     </Button>
                      <Button onClick={handleDownloadCheatSheetPDF} variant="outline" className="glass hover:bg-white/5 flex-1 sm:flex-initial">
                        <Download className="mr-2 h-4 w-4" />
                        Download PDF
@@ -1737,7 +1933,7 @@ export default function SubjectPage() {
                  </div>
               ) : (
                 <div className="p-8 md:p-10 rounded-xl border border-white/10 bg-card shadow-xl relative group mb-8">
-                  <div id="cheat-sheet-content" className="prose dark:prose-invert prose-p:text-slate-700 dark:prose-p:text-slate-300 prose-headings:text-slate-800 dark:prose-headings:text-slate-100 max-w-none text-base md:text-lg leading-relaxed marker:text-primary pb-8">
+                  <div ref={cheatSheetContentRef} id="cheat-sheet-content" className="prose dark:prose-invert prose-p:text-slate-700 dark:prose-p:text-slate-300 prose-headings:text-slate-800 dark:prose-headings:text-slate-100 max-w-none text-base md:text-lg leading-relaxed marker:text-primary pb-8">
                       <ReactMarkdown 
                            remarkPlugins={[remarkGfm]}
                            components={MarkdownComponents}
