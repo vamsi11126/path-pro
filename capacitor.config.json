@@ -1,0 +1,9 @@
+{
+  "appId": "com.learnify.app",
+  "appName": "Learnify",
+  "webDir": "out",
+  "server": {
+    "url": "https://learnify-x.vercel.app/",
+    "cleartext": true
+  }
+}
