@@ -287,7 +287,12 @@ export async function POST(request) {
           * quadrantChart (use pie or table instead)
           
           NODE LABEL RULES (CRITICAL):
-          - ALWAYS quote labels with parentheses: A["Label (text)"]
+          - ALWAYS explicitly quote ALL labels to prevent parse errors, especially for decision diamonds and round edges.
+          - Example Standard Node: A["Label (text)"]
+          - Example Decision Node: B{"Decision Text?"}
+          - NEVER leave a space between the node id and its shape bracket: A ["WRONG"] -> A["RIGHT"]
+          - WRONG: C{Handle Missing 1}
+          - RIGHT: C{"Handle Missing 1"}
           - WRONG: NH2[Amino Group (-NH2)]
           - RIGHT: NH2["Amino Group (-NH2)"]
           - Keep labels simple, avoid special characters

@@ -1170,6 +1170,11 @@ export default function SubjectPage() {
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <h1 className="text-xl md:text-2xl font-bold tracking-tight truncate">{subject.title}</h1>
+                  {subject.knowledge_level && (
+                    <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-primary/10 text-primary border border-primary/20 shrink-0 capitalize">
+                      {subject.knowledge_level}
+                    </span>
+                  )}
                   <Button 
                     variant="ghost" 
                     size="icon" 
@@ -1419,6 +1424,26 @@ export default function SubjectPage() {
                     totalMinutes={analytics.totalMinutes || 0} 
                 />
 
+                {/* Prerequisites */}
+                {subject.core_prerequisites && (
+                  <Card className="glass-card border-orange-500/20 bg-orange-500/5">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-lg flex items-center gap-2 text-orange-500">
+                        <BookOpen className="h-5 w-5" />
+                        Assumed Prerequisites
+                      </CardTitle>
+                      <CardDescription className="text-orange-500/80">
+                        Because of the selected Knowledge Level, the system assumes you already know these core concepts. They are omitted from the graph to save time.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-sm md:text-base leading-relaxed text-foreground">
+                        {subject.core_prerequisites}
+                      </p>
+                    </CardContent>
+                  </Card>
+                )}
+
                 {/* Subject description */}
                 {formattedSubjectDescription && (
                   <Card className="glass-card group relative">
@@ -1477,6 +1502,24 @@ export default function SubjectPage() {
           </TabsContent>
 
           <TabsContent value="topics" className="flex-1 overflow-y-auto p-6 space-y-4 pb-[calc(1.5rem+env(safe-area-inset-bottom))] container mx-auto">
+            {subject.core_prerequisites && topics.length > 0 && (
+              <div className="mb-6 p-4 rounded-xl border border-orange-500/20 bg-orange-500/10">
+                <div className="flex items-start gap-3">
+                  <div className="p-2 bg-orange-500/20 rounded-full shrink-0">
+                    <BookOpen className="h-5 w-5 text-orange-500" />
+                  </div>
+                  <div className="space-y-1">
+                    <h4 className="font-semibold text-orange-500 text-base">Assumed Baseline Knowledge</h4>
+                    <p className="text-sm text-orange-500/80">
+                      Since this is an advanced learning path, you are expected to already know the following basics:
+                    </p>
+                    <p className="text-sm text-foreground mt-2 font-medium">
+                      {subject.core_prerequisites}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
             {topics.length === 0 ? (
               <Card className="glass-card border-dashed border-foreground/10">
                 <CardContent className="flex flex-col items-center justify-center py-16">

@@ -19,7 +19,7 @@ export async function POST(request) {
     }
 
     const body = await request.json()
-    const { subjectId, seedText, difficulty = 3, totalMinutes = 300 } = body
+    const { subjectId, seedText, difficulty = 3, totalMinutes = 300, knowledgeLevel = 'Beginner' } = body
 
     if (!subjectId) {
       return NextResponse.json({ error: 'Missing subject id' }, { status: 400 })
@@ -134,16 +134,21 @@ INSTRUCTION: Use the user's profile to tailor the difficulty, examples, and prog
     const systemPrompt = `You are a curriculum designer. Generate a learning path as a directed acyclic graph (DAG).
 ${personalizationContext}
 
+The target Knowledge Level for this subject is: ${knowledgeLevel}.
+${knowledgeLevel === 'Beginner' ? 'For Beginners: Start from absolute fundamentals. Prerequisites should be linear and foundational.' : ''}
+${knowledgeLevel === 'Intermediate' ? 'For Intermediate: Skip all "Introduction" and "Basic Syntax" nodes. Start the graph at "Best Practices", "Design Patterns", and "Optimization". Ensure that you explicitly define the skipped pre-requisite knowledge in the "core_prerequisites" string field.' : ''}
+${knowledgeLevel === 'Professional' ? 'For Professionals: Skip 80% of the standard curriculum. The graph should be "shallow but deep" with fewer nodes, but each node representing a high-level mastery topic. Ensure that you explicitly define the skipped pre-requisite knowledge in the "core_prerequisites" string field.' : ''}
+
 CRITICAL RULES:
 1. Output ONLY valid JSON, absolutely NO markdown code blocks, no explanations
-2. Create all the topics to provide COMPREHENSIVE coverage of the subject(All the concepts in the subject must be covered), minimum 17-18 topics must  be present , There is no maximum limit for the number of topics. All the topics regarding the subject must be covered without missing any dependencies. Ensure that all the topics are coverd strictly.
-3. Prioritize breadth of topics. Cover all key areas, from basics to advanced.
+2. Construct a valid Directed Acyclic Graph (DAG) structure. Every topic must have a logical path to a "Mastery" leaf node so the Unlocking Engine functions correctly.
+3. The number of nodes should be decided by you based on the Knowledge Level and the required depth. Create enough topics to satisfy the curriculum, but do not enforce an arbitrary minimum or maximum limit. Cover all key areas accurately.
 4. Each topic needs: slug (unique_id), title, brief description, estimatedMinutes
 5. Dependencies use slugs, not array indices
 6. Ensure NO CYCLES in the dependency graph
-6. First topic should have no dependencies (entry point)
-7. Difficulty level: ${difficulty}/5
-8. Total study time: approximately ${totalMinutes} minutes
+7. First topic should have no dependencies (entry point)
+8. Difficulty level: ${difficulty}/5
+9. Total study time: approximately ${totalMinutes} minutes
 
 EXISTING TOPICS (DO NOT DUPLICATE):
 ${existingTopicsList}
@@ -152,6 +157,7 @@ IMPORTANT: If any of the above existing topics already cover a concept you want 
 
 JSON FORMAT (NO CODE BLOCKS):
 {
+  "core_prerequisites": "Skip this if beginner. Otherwise, a clear, concise string defining exactly what base knowledge is required/assumed before starting this graph.",
   "topics": [
     {
       "slug": "intro-basics",
@@ -219,6 +225,14 @@ ${subjectContext}`
     const hasCycle = detectCycle(curriculum.topics)
     if (hasCycle) {
       return NextResponse.json({ error: 'Curriculum has circular dependencies' }, { status: 500 })
+    }
+
+    // Save core prerequisites to subject
+    if (curriculum.core_prerequisites) {
+      await supabase
+        .from('subjects')
+        .update({ core_prerequisites: curriculum.core_prerequisites })
+        .eq('id', subjectId)
     }
 
     // === Use existing topics for deduplication map ===

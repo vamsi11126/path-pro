@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Plus, Book, MoreVertical, Pencil, Trash2, Key, User, Activity, Clock, Trophy, Sparkles, PenTool } from 'lucide-react'
@@ -27,7 +28,7 @@ export default function Dashboard() {
   const [isEditOpen, setIsEditOpen] = useState(false)
   const [isDeleteOpen, setIsDeleteOpen] = useState(false)
   const [selectedSubject, setSelectedSubject] = useState(null)
-  const [newSubject, setNewSubject] = useState({ title: '', description: '', syllabus: '' })
+  const [newSubject, setNewSubject] = useState({ title: '', description: '', syllabus: '', knowledgeLevel: 'Beginner' })
 
   const [analytics, setAnalytics] = useState({ totalMinutes: 0, subjectStats: [], weeklyData: [], dueReviews: [] })
   const [hasProfile, setHasProfile] = useState(false)
@@ -45,10 +46,11 @@ export default function Dashboard() {
       setNewSubject({
         title: selectedSubject.title,
         description: selectedSubject.description || '',
-        syllabus: selectedSubject.syllabus || ''
+        syllabus: selectedSubject.syllabus || '',
+        knowledgeLevel: selectedSubject.knowledge_level || 'Beginner'
       })
     } else if (!isEditOpen && !isCreateOpen) {
-      setNewSubject({ title: '', description: '', syllabus: '' })
+      setNewSubject({ title: '', description: '', syllabus: '', knowledgeLevel: 'Beginner' })
     }
   }, [selectedSubject, isEditOpen, isCreateOpen])
 
@@ -174,6 +176,7 @@ export default function Dashboard() {
         title: newSubject.title,
         description: newSubject.description,
         syllabus: newSubject.syllabus,
+        knowledge_level: newSubject.knowledgeLevel,
         is_public: false
       }])
       .select()
@@ -187,7 +190,7 @@ export default function Dashboard() {
       // If valid manual mode, we are done
       if (creationMode === 'manual') {
         toast.success('Subject created successfully!')
-        setNewSubject({ title: '', description: '', syllabus: '' })
+        setNewSubject({ title: '', description: '', syllabus: '', knowledgeLevel: 'Beginner' })
         setIsCreateOpen(false)
         setGenerating(false)
         loadSubjects(user.id)
@@ -211,12 +214,13 @@ export default function Dashboard() {
                 subjectId: subjectData.id,
                 seedText: [subjectData.description, subjectData.syllabus].filter(Boolean).join('\n\n'),
                 difficulty: 3, // Default, will be refined by AI context
-                totalMinutes: 300 // Default
+                totalMinutes: 300, // Default
+                knowledgeLevel: newSubject.knowledgeLevel
               })
           })
           
           toast.success('Subject created & curriculum generated!')
-          setNewSubject({ title: '', description: '', syllabus: '' })
+          setNewSubject({ title: '', description: '', syllabus: '', knowledgeLevel: 'Beginner' })
           setIsCreateOpen(false)
           loadSubjects(user.id)
       } catch (genError) {
@@ -239,7 +243,8 @@ export default function Dashboard() {
       .update({
         title: newSubject.title,
         description: newSubject.description,
-        syllabus: newSubject.syllabus
+        syllabus: newSubject.syllabus,
+        knowledge_level: newSubject.knowledgeLevel
       })
       .eq('id', selectedSubject.id)
 
@@ -370,6 +375,21 @@ export default function Dashboard() {
                       className="bg-background/50 border-white/10 focus:border-primary/50 min-h-[120px]"
                     />
                   </div>
+                  {creationMode === 'ai' && (
+                    <div className="space-y-2">
+                      <Label htmlFor="knowledgeLevel">Knowledge Level</Label>
+                      <Select value={newSubject.knowledgeLevel} onValueChange={(val) => setNewSubject({ ...newSubject, knowledgeLevel: val })}>
+                        <SelectTrigger className="bg-background/50 border-white/10 focus:ring-primary/50">
+                          <SelectValue placeholder="Select a level" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Beginner">Beginner</SelectItem>
+                          <SelectItem value="Intermediate">Intermediate</SelectItem>
+                          <SelectItem value="Professional">Professional</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
 
                   {creationMode === 'ai' && (
                      <div className="rounded-md bg-primary/10 p-3 text-sm text-primary flex gap-2">
@@ -592,6 +612,19 @@ export default function Dashboard() {
                   onChange={(e) => setNewSubject({ ...newSubject, syllabus: e.target.value })}
                   className="bg-background/50 border-white/10 focus:border-primary/50 min-h-[120px]"
                 />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-knowledgeLevel">Knowledge Level</Label>
+                <Select value={newSubject.knowledgeLevel} onValueChange={(val) => setNewSubject({ ...newSubject, knowledgeLevel: val })}>
+                  <SelectTrigger className="bg-background/50 border-white/10 focus:ring-primary/50">
+                    <SelectValue placeholder="Select a level" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Beginner">Beginner</SelectItem>
+                    <SelectItem value="Intermediate">Intermediate</SelectItem>
+                    <SelectItem value="Professional">Professional</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
             <DialogFooter>
