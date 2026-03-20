@@ -1,8 +1,6 @@
 'use client'
 
 import React, { useState, useEffect, useCallback, useRef } from 'react'
-import { Capacitor } from '@capacitor/core'
-import { SpeechRecognition as NativeSpeechRecognition } from '@capacitor-community/speech-recognition'
 import { PenLine, X, Loader2, Save, Mic, List, AlertCircle, Lightbulb, CheckSquare, Clock, Edit2, Eye, Volume2, Square } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { saveTopicNotes } from '@/lib/actions'
@@ -11,6 +9,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
 import CodeBlock, { cleanCodeContent, parseMermaidTitle, parseMermaidDescription } from './CodeBlock'
+import { getCapacitorPlatform, getNativeSpeechRecognition, isCapacitorNativePlatform } from '@/lib/capacitor/client'
 import { buildSpeechIndexMap, extractSpeechTextFromContainer, isSpeechSynthesisSupported, normalizeTextForSpeech, playSpeechWithInlineHighlight, stopSpeechSynthesis } from '@/lib/speech'
 
 const FENCED_BLOCK_REGEX = /```([^\n`]*)\n([\s\S]*?)```/g
@@ -217,7 +216,6 @@ const NOTE_PREVIEW_COMPONENTS = {
 }
 
 export default function StickyNoteWidget({ initialNotes = '', topicId, topicTitle, onSaveNotes = null }) {
-  const isAndroidNative = Capacitor.getPlatform() === 'android'
   const [isOpen, setIsOpen] = useState(false)
   const defaultNote = initialNotes ? initialNotes : (topicTitle ? `# ${topicTitle}\n\n` : '')
   const [notes, setNotes] = useState(defaultNote)
@@ -230,6 +228,8 @@ export default function StickyNoteWidget({ initialNotes = '', topicId, topicTitl
   const [isSpeaking, setIsSpeaking] = useState(false)
   const [isPreview, setIsPreview] = useState(false)
   const [expandedRawBlocks, setExpandedRawBlocks] = useState({})
+  const [isAndroidNative, setIsAndroidNative] = useState(false)
+  const [isNativePlatform, setIsNativePlatform] = useState(false)
   const recognitionRef = useRef(null)
   const textareaRef = useRef(null)
   const previewContainerRef = useRef(null)
@@ -243,11 +243,22 @@ export default function StickyNoteWidget({ initialNotes = '', topicId, topicTitl
   const insertAtCursorRef = useRef(null)
   const nativeSpeechSessionRef = useRef(0)
   const nativeSpeechCancelledRef = useRef(false)
+  const nativeSpeechRecognitionRef = useRef(null)
   const speechPlaybackRef = useRef(null)
   const pendingSpeechStartRef = useRef(false)
   const previewModeBeforeSpeechRef = useRef(false)
   const editorSegments = createEditorSegments(notes)
   const hasMaskedBlocks = editorSegments.some((segment) => segment.type === 'block')
+
+  const loadNativeSpeechRecognition = useCallback(async () => {
+    if (nativeSpeechRecognitionRef.current) {
+      return nativeSpeechRecognitionRef.current
+    }
+
+    const plugin = await getNativeSpeechRecognition()
+    nativeSpeechRecognitionRef.current = plugin
+    return plugin
+  }, [])
 
   const handleSave = useCallback(async (currentNotes) => {
     setIsSaving(true)
@@ -289,6 +300,30 @@ export default function StickyNoteWidget({ initialNotes = '', topicId, topicTitl
       setSaveStatus('saved')
     }
   }, [initialNotes])
+
+  useEffect(() => {
+    let cancelled = false
+
+    const loadPlatform = async () => {
+      const [platform, nativePlatform] = await Promise.all([
+        getCapacitorPlatform(),
+        isCapacitorNativePlatform()
+      ])
+
+      if (cancelled) {
+        return
+      }
+
+      setIsAndroidNative(platform === 'android')
+      setIsNativePlatform(nativePlatform)
+    }
+
+    loadPlatform()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     setHasSpeechPlaybackSupport(isSpeechSynthesisSupported())
@@ -486,8 +521,10 @@ export default function StickyNoteWidget({ initialNotes = '', topicId, topicTitl
     }
 
     if (isAndroidNative) {
-      NativeSpeechRecognition.stop().catch(() => {})
-      NativeSpeechRecognition.removeAllListeners().catch(() => {})
+      void loadNativeSpeechRecognition().then((plugin) => {
+        plugin?.stop?.().catch(() => {})
+        plugin?.removeAllListeners?.().catch(() => {})
+      })
       releaseMicrophone()
       return
     }
@@ -499,7 +536,7 @@ export default function StickyNoteWidget({ initialNotes = '', topicId, topicTitl
     }
 
     releaseMicrophone()
-  }, [isAndroidNative, releaseMicrophone])
+  }, [isAndroidNative, loadNativeSpeechRecognition, releaseMicrophone])
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -509,10 +546,11 @@ export default function StickyNoteWidget({ initialNotes = '', topicId, topicTitl
     if (isAndroidNative) {
       let cancelled = false
 
-      NativeSpeechRecognition.available()
-        .then(({ available }) => {
+      loadNativeSpeechRecognition()
+        .then((plugin) => plugin?.available?.())
+        .then((result) => {
           if (!cancelled) {
-            setHasSpeechSupport(available)
+            setHasSpeechSupport(Boolean(result?.available))
           }
         })
         .catch((error) => {
@@ -524,8 +562,10 @@ export default function StickyNoteWidget({ initialNotes = '', topicId, topicTitl
 
       return () => {
         cancelled = true
-        NativeSpeechRecognition.stop().catch(() => {})
-        NativeSpeechRecognition.removeAllListeners().catch(() => {})
+        void loadNativeSpeechRecognition().then((plugin) => {
+          plugin?.stop?.().catch(() => {})
+          plugin?.removeAllListeners?.().catch(() => {})
+        })
       }
     }
 
@@ -536,7 +576,7 @@ export default function StickyNoteWidget({ initialNotes = '', topicId, topicTitl
     }
 
     const recognition = new SpeechRecognition()
-    const isNative = Capacitor.isNativePlatform()
+    const isNative = isNativePlatform
     recognition.continuous = !isNative // Non-continuous on Android native for stability
     recognition.interimResults = true
     recognition.maxAlternatives = 1
@@ -576,7 +616,7 @@ export default function StickyNoteWidget({ initialNotes = '', topicId, topicTitl
       if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
         stopRecording()
         toast.error(
-          Capacitor.isNativePlatform()
+          isNativePlatform
             ? 'Voice recognition is unavailable or blocked on this device.'
             : 'Microphone permission was denied.'
         )
@@ -634,7 +674,7 @@ export default function StickyNoteWidget({ initialNotes = '', topicId, topicTitl
       stopRecording()
       recognitionRef.current = null
     }
-  }, [isAndroidNative, releaseMicrophone, stopRecording])
+  }, [isAndroidNative, isNativePlatform, loadNativeSpeechRecognition, releaseMicrophone, stopRecording])
 
   useEffect(() => {
     const handleAddSnippet = (event) => {
@@ -659,12 +699,18 @@ export default function StickyNoteWidget({ initialNotes = '', topicId, topicTitl
   const ensureMicrophoneAccess = useCallback(async () => {
     if (isAndroidNative) {
       try {
-        const permissionStatus = await NativeSpeechRecognition.checkPermissions()
+        const nativeSpeechRecognition = await loadNativeSpeechRecognition()
+        if (!nativeSpeechRecognition) {
+          toast.error('Android speech recognition is unavailable on this device.')
+          return false
+        }
+
+        const permissionStatus = await nativeSpeechRecognition.checkPermissions()
         if (permissionStatus.speechRecognition === 'granted') {
           return true
         }
 
-        const requestedStatus = await NativeSpeechRecognition.requestPermissions()
+        const requestedStatus = await nativeSpeechRecognition.requestPermissions()
         if (requestedStatus.speechRecognition === 'granted') {
           return true
         }
@@ -695,7 +741,7 @@ export default function StickyNoteWidget({ initialNotes = '', topicId, topicTitl
           return true
         }
 
-        if (permissionStatus.state === 'denied' && !Capacitor.isNativePlatform()) {
+        if (permissionStatus.state === 'denied' && !isNativePlatform) {
           toast.error('Allow microphone access in your browser to use voice notes.')
           return false
         }
@@ -712,7 +758,7 @@ export default function StickyNoteWidget({ initialNotes = '', topicId, topicTitl
     } catch (error) {
       console.error('Microphone permission error', error)
 
-      if (Capacitor.isNativePlatform()) {
+      if (isNativePlatform) {
         // Fallback: WebViews sometimes block getUserMedia despite app permissions.
         // We return true because Web Speech API might still work natively.
         return true
@@ -722,7 +768,7 @@ export default function StickyNoteWidget({ initialNotes = '', topicId, topicTitl
 
       return false
     }
-  }, [isAndroidNative, releaseMicrophone])
+  }, [isAndroidNative, isNativePlatform, loadNativeSpeechRecognition, releaseMicrophone])
 
   const toggleRecording = async () => {
     if (isRecording) {
@@ -756,7 +802,8 @@ export default function StickyNoteWidget({ initialNotes = '', topicId, topicTitl
 
     if (isAndroidNative) {
       try {
-        const { available } = await NativeSpeechRecognition.available()
+        const nativeSpeechRecognition = await loadNativeSpeechRecognition()
+        const { available } = await nativeSpeechRecognition.available()
         if (!available) {
           setIsPreparingMic(false)
           toast.error('Android speech recognition is unavailable on this device.')
@@ -769,8 +816,8 @@ export default function StickyNoteWidget({ initialNotes = '', topicId, topicTitl
         nativeSpeechSessionRef.current += 1
         const sessionId = nativeSpeechSessionRef.current
 
-        await NativeSpeechRecognition.removeAllListeners().catch(() => {})
-        await NativeSpeechRecognition.addListener('listeningState', ({ status }) => {
+        await nativeSpeechRecognition.removeAllListeners().catch(() => {})
+        await nativeSpeechRecognition.addListener('listeningState', ({ status }) => {
           if (sessionId !== nativeSpeechSessionRef.current) {
             return
           }
@@ -785,7 +832,7 @@ export default function StickyNoteWidget({ initialNotes = '', topicId, topicTitl
           }
         })
 
-        const startPromise = NativeSpeechRecognition.start({
+        const startPromise = nativeSpeechRecognition.start({
           language: 'en-US',
           maxResults: 1,
           popup: false,
@@ -851,7 +898,7 @@ export default function StickyNoteWidget({ initialNotes = '', topicId, topicTitl
               recordingTimeoutRef.current = null
             }
 
-            NativeSpeechRecognition.removeAllListeners().catch(() => {})
+            nativeSpeechRecognition.removeAllListeners().catch(() => {})
           })
 
         return

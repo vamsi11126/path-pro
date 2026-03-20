@@ -1,8 +1,8 @@
 'use client'
 
 import { useEffect, useRef } from 'react'
-import { App } from '@capacitor/app'
 import { usePathname } from 'next/navigation'
+import { addCapacitorAppListener, exitCapacitorApp } from '@/lib/capacitor/client'
 
 export function AppInitializer() {
   const pathname = usePathname()
@@ -48,23 +48,30 @@ export function AppInitializer() {
 
   useEffect(() => {
     let backButtonListener
+    let cancelled = false
 
     const setupListener = async () => {
-      backButtonListener = await App.addListener('backButton', async () => {
+      const listener = await addCapacitorAppListener('backButton', async () => {
         if (pathnameRef.current === '/' || pathnameRef.current === '/dashboard') {
-          await App.exitApp()
+          await exitCapacitorApp()
         } else {
           window.history.back()
         }
       })
+
+      if (cancelled) {
+        listener?.remove?.()
+        return
+      }
+
+      backButtonListener = listener
     }
-    
+
     setupListener()
 
     return () => {
-      if (backButtonListener) {
-        backButtonListener.remove()
-      }
+      cancelled = true
+      backButtonListener?.remove?.()
     }
   }, [])
 

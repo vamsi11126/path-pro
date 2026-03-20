@@ -7,6 +7,7 @@ import {
   ArrowLeft,
   ArrowRight,
   BookOpen,
+  ClipboardCheck,
   Clock3,
   GraduationCap,
   Layers3,
@@ -299,15 +300,26 @@ export default function ClassroomDetailPage() {
                   </div>
                   <p className="mt-2 md:mt-2.5 max-w-[280px] text-[11px] md:text-sm leading-relaxed text-muted-foreground">Follow the suggested paths in your assigned courses. Learn topics, then review them when prompted.</p>
                 </div>
-                <div className="rounded-xl md:rounded-[18px] border border-white/5 bg-white/[0.02] p-3 md:p-4 hover:bg-white/[0.04] transition-colors overflow-hidden">
-                  <div className="flex items-center gap-2.5 text-foreground font-semibold text-xs md:text-sm">
-                    <span className="p-1.5 rounded-lg bg-orange-500/10 text-orange-400 shrink-0 min-w-max"><Clock3 className="h-4 w-4" /></span>
-                    <span className="truncate">Spaced Repetition</span>
-                  </div>
-                  <p className="mt-2 md:mt-2.5 max-w-[280px] text-[11px] md:text-sm leading-relaxed text-muted-foreground">Keep your &quot;Due&quot; reviews low. They are scheduled to optimize memory retention over time.</p>
+              <div className="rounded-xl md:rounded-[18px] border border-white/5 bg-white/[0.02] p-3 md:p-4 hover:bg-white/[0.04] transition-colors overflow-hidden">
+                <div className="flex items-center gap-2.5 text-foreground font-semibold text-xs md:text-sm">
+                  <span className="p-1.5 rounded-lg bg-orange-500/10 text-orange-400 shrink-0 min-w-max"><Clock3 className="h-4 w-4" /></span>
+                  <span className="truncate">Spaced Repetition</span>
                 </div>
-              </CardContent>
-            </Card>
+                <p className="mt-2 md:mt-2.5 max-w-[280px] text-[11px] md:text-sm leading-relaxed text-muted-foreground">Keep your &quot;Due&quot; reviews low. They are scheduled to optimize memory retention over time.</p>
+              </div>
+              <Button
+                variant="outline"
+                className="w-full justify-between border-white/10 bg-white/[0.04]"
+                onClick={() => router.push(`/classrooms/${params.classroomId}/assessments`)}
+              >
+                <span className="flex items-center gap-2">
+                  <ClipboardCheck className="h-4 w-4 text-primary" />
+                  Open Assessments
+                </span>
+                <ArrowRight className="h-4 w-4" />
+              </Button>
+            </CardContent>
+          </Card>
 
             {highlightedCourse && (
               <Card className="rounded-[20px] md:rounded-[24px] border-white/10 bg-card/50 backdrop-blur-sm shadow-lg">

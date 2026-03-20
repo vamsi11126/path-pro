@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { Activity, AlertTriangle, ArrowLeft, BookOpen, Clock3, RotateCcw, Search, Target, TrendingDown, TrendingUp, Users } from 'lucide-react'
+import { Activity, AlertTriangle, ArrowLeft, BookOpen, ClipboardCheck, Clock3, RotateCcw, Search, Target, TrendingDown, TrendingUp, Users } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -60,20 +60,47 @@ export default function TeacherClassroomAnalyticsPage() {
   const router = useRouter()
   const [loading, setLoading] = useState(true)
   const [analytics, setAnalytics] = useState(null)
+  const [assessmentOverview, setAssessmentOverview] = useState({
+    total: 0,
+    published: 0,
+    pendingReview: 0,
+    averageScore: 'N/A'
+  })
   const [selectedStudentId, setSelectedStudentId] = useState(null)
   const [query, setQuery] = useState('')
 
   useEffect(() => {
     const load = async () => {
       try {
-        const response = await fetch(`/api/teacher/classrooms/${params.classroomId}/analytics`)
-        const payload = await response.json()
+        const [analyticsResponse, assessmentsResponse] = await Promise.all([
+          fetch(`/api/teacher/classrooms/${params.classroomId}/analytics`),
+          fetch(`/api/teacher/classrooms/${params.classroomId}/assessments`)
+        ])
+        const [payload, assessmentsPayload] = await Promise.all([
+          analyticsResponse.json(),
+          assessmentsResponse.json()
+        ])
 
-        if (!response.ok) {
+        if (!analyticsResponse.ok) {
           throw new Error(payload.error || 'Failed to load analytics')
         }
 
         setAnalytics(payload)
+
+        if (assessmentsResponse.ok) {
+          const assessments = assessmentsPayload.assessments || []
+          const completed = assessments.filter((assessment) => typeof assessment.averageScore === 'number')
+          const averageScore = completed.length > 0
+            ? `${Math.round(completed.reduce((sum, assessment) => sum + assessment.averageScore, 0) / completed.length)}%`
+            : 'N/A'
+
+          setAssessmentOverview({
+            total: assessments.length,
+            published: assessments.filter((assessment) => assessment.status === 'published').length,
+            pendingReview: assessments.reduce((sum, assessment) => sum + (assessment.pendingReviewCount || 0), 0),
+            averageScore
+          })
+        }
       } catch (error) {
         toast.error(error.message)
         router.push(`/teacher/classrooms/${params.classroomId}`)
@@ -116,10 +143,12 @@ export default function TeacherClassroomAnalyticsPage() {
   const stats = [
     { icon: Users, label: 'Roster', value: analytics.summary.rosterSize },
     { icon: BookOpen, label: 'Courses', value: analytics.summary.totalCourses },
+    { icon: ClipboardCheck, label: 'Assessments', value: assessmentOverview.total, tone: 'text-foreground' },
     { icon: TrendingUp, label: 'Active this week', value: analytics.summary.activeStudentsThisWeek, tone: 'text-emerald-600 dark:text-emerald-300' },
     { icon: AlertTriangle, label: 'Need attention', value: analytics.summary.studentsNeedingAttention, tone: 'text-orange-600 dark:text-orange-300' },
     { icon: Target, label: 'Average completion', value: `${analytics.summary.averageCompletion}%`, tone: 'text-foreground' },
-    { icon: RotateCcw, label: 'Review quality', value: formatQuality(analytics.summary.averageReviewQuality), tone: 'text-foreground' }
+    { icon: RotateCcw, label: 'Review quality', value: formatQuality(analytics.summary.averageReviewQuality), tone: 'text-foreground' },
+    { icon: ClipboardCheck, label: 'Pending grading', value: assessmentOverview.pendingReview, tone: 'text-orange-600 dark:text-orange-300' }
   ]
 
   const SpotlightTrend = getTrendIcon(spotlightStudent?.trend?.direction)
@@ -358,6 +387,30 @@ export default function TeacherClassroomAnalyticsPage() {
                 <div className="rounded-2xl border border-border/60 bg-background/75 p-4"><div className="flex items-center gap-2 text-foreground"><RotateCcw className="h-4 w-4 text-primary" />Due reviews</div><p className="mt-2 leading-6">Rising due reviews usually mean retention is falling before completion numbers make it obvious.</p></div>
                 <div className="rounded-2xl border border-border/60 bg-background/75 p-4"><div className="flex items-center gap-2 text-foreground"><Target className="h-4 w-4 text-primary" />Weak review quality</div><p className="mt-2 leading-6">If multiple students show low quality on the same topic, reteach the concept or improve the explanation.</p></div>
                 <div className="rounded-2xl border border-border/60 bg-background/75 p-4"><div className="flex items-center gap-2 text-foreground"><Clock3 className="h-4 w-4 text-primary" />Recent momentum</div><p className="mt-2 leading-6">A drop in weekly study time with low completion is the clearest sign to intervene early.</p></div>
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-[24px] border-border/60 bg-card/80 backdrop-blur-sm">
+              <CardHeader>
+                <CardTitle>Assessment pulse</CardTitle>
+                <CardDescription>High-level assessment pressure inside this classroom.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm text-muted-foreground">
+                <div className="rounded-2xl border border-border/60 bg-background/75 p-4">
+                  <div className="font-medium text-foreground">Published assessments</div>
+                  <div className="mt-2 text-2xl font-semibold text-foreground">{assessmentOverview.published}</div>
+                </div>
+                <div className="rounded-2xl border border-border/60 bg-background/75 p-4">
+                  <div className="font-medium text-foreground">Pending grading</div>
+                  <div className="mt-2 text-2xl font-semibold text-foreground">{assessmentOverview.pendingReview}</div>
+                </div>
+                <div className="rounded-2xl border border-border/60 bg-background/75 p-4">
+                  <div className="font-medium text-foreground">Average assessment score</div>
+                  <div className="mt-2 text-2xl font-semibold text-foreground">{assessmentOverview.averageScore}</div>
+                </div>
+                <Button className="w-full" onClick={() => router.push(`/teacher/classrooms/${params.classroomId}/assessments`)}>
+                  Open Assessment Center
+                </Button>
               </CardContent>
             </Card>
           </div>

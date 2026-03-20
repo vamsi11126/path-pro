@@ -1,37 +1,55 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Capacitor } from '@capacitor/core';
 import { Download, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { AnimatePresence, motion } from 'framer-motion';
+import { getCapacitorPlatform, isCapacitorNativePlatform } from '@/lib/capacitor/client';
 
 export function DownloadBanner() {
   const [isVisible, setIsVisible] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
 
   useEffect(() => {
-    setIsMounted(true);
-    // CRITICAL: This banner MUST NOT appear in the Android application.
-    // The user has strictly requested that this never shows up in the native app.
-    // We use multiple checks to ensure safety.
-    const platform = Capacitor.getPlatform();
-    const isNative = Capacitor.isNativePlatform();
-    
-    if (platform === 'android' || platform === 'ios' || isNative) {
-      console.log('DownloadBanner: Native platform detected, suppressing banner.');
-      return;
-    }
-    
-    // Only show if NOT native and we haven't dismissed it this session
-    // You could also use localStorage to persist dismissal across sessions if desired
-    const isDismissed = sessionStorage.getItem('download-banner-dismissed');
-    
-    if (!isDismissed) {
-      // Small delay for entrance animation
-      const timer = setTimeout(() => setIsVisible(true), 1000);
-      return () => clearTimeout(timer);
-    }
+    let cancelled = false;
+    let timer;
+
+    const initializeBanner = async () => {
+      setIsMounted(true);
+
+      const [platform, isNative] = await Promise.all([
+        getCapacitorPlatform(),
+        isCapacitorNativePlatform(),
+      ]);
+
+      if (cancelled) {
+        return;
+      }
+
+      if (platform === 'android' || platform === 'ios' || isNative) {
+        console.log('DownloadBanner: Native platform detected, suppressing banner.');
+        return;
+      }
+
+      const isDismissed = sessionStorage.getItem('download-banner-dismissed');
+
+      if (!isDismissed) {
+        timer = setTimeout(() => {
+          if (!cancelled) {
+            setIsVisible(true);
+          }
+        }, 1000);
+      }
+    };
+
+    initializeBanner();
+
+    return () => {
+      cancelled = true;
+      if (timer) {
+        clearTimeout(timer);
+      }
+    };
   }, []);
 
   const handleDismiss = () => {

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import {
@@ -8,6 +8,7 @@ import {
   ArrowRight,
   BookOpen,
   ChartColumn,
+  ClipboardCheck,
   Layers3,
   Mail,
   Plus,
@@ -27,7 +28,7 @@ export default function TeacherClassroomDetailPage() {
   const [detail, setDetail] = useState(null)
   const [subjectId, setSubjectId] = useState('')
 
-  const loadDetail = async () => {
+  const loadDetail = useCallback(async () => {
     try {
       const response = await fetch(`/api/teacher/classrooms/${params.classroomId}`)
       const data = await response.json()
@@ -46,11 +47,11 @@ export default function TeacherClassroomDetailPage() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [params.classroomId, router, subjectId])
 
   useEffect(() => {
     loadDetail()
-  }, [params.classroomId, router])
+  }, [loadDetail])
 
   const unassignedSubjects = useMemo(() => {
     if (!detail) return []
@@ -142,7 +143,7 @@ export default function TeacherClassroomDetailPage() {
               </p>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid gap-3 sm:grid-cols-3">
               <Button
                 variant="outline"
                 className="h-11 border-white/10 bg-white/5"
@@ -157,6 +158,14 @@ export default function TeacherClassroomDetailPage() {
               >
                 <ChartColumn className="mr-2 h-4 w-4" />
                 Open Analytics
+              </Button>
+              <Button
+                variant="outline"
+                className="h-11 border-white/10 bg-white/5"
+                onClick={() => router.push(`/teacher/classrooms/${params.classroomId}/assessments`)}
+              >
+                <ClipboardCheck className="mr-2 h-4 w-4" />
+                Assessments
               </Button>
             </div>
           </div>
@@ -323,6 +332,17 @@ export default function TeacherClassroomDetailPage() {
                 <span className="flex items-center gap-2">
                   <ChartColumn className="h-4 w-4 text-primary" />
                   Performance Analytics
+                </span>
+                <ArrowRight className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="outline"
+                className="h-11 w-full justify-between border-white/10 bg-white/[0.04]"
+                onClick={() => router.push(`/teacher/classrooms/${params.classroomId}/assessments`)}
+              >
+                <span className="flex items-center gap-2">
+                  <ClipboardCheck className="h-4 w-4 text-primary" />
+                  Assessment Center
                 </span>
                 <ArrowRight className="h-4 w-4" />
               </Button>

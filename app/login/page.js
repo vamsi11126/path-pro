@@ -12,9 +12,12 @@ import { toast } from 'sonner'
 import Link from 'next/link'
 import { GoogleIcon } from '@/components/ui/icons'
 import { ThemeToggle } from '@/components/sub-components/theme-toggle'
-import { App } from '@capacitor/app'
-import { Capacitor } from '@capacitor/core'
-import { Browser } from '@capacitor/browser'
+import {
+  addCapacitorAppListener,
+  closeCapacitorBrowser,
+  isCapacitorNativePlatform,
+  openCapacitorBrowser
+} from '@/lib/capacitor/client'
 
 function LoginContent() {
   const router = useRouter()
@@ -43,11 +46,11 @@ function LoginContent() {
     })
 
     // Listen for the app being opened by a deep link (Custom Scheme)
-    const appListener = App.addListener('appUrlOpen', async (data) => {
+    const appListener = addCapacitorAppListener('appUrlOpen', async (data) => {
       // data.url will contain "com.learnify.app://auth-callback?code=..."
       if (data.url.includes('auth-callback')) {
         // Close the browser if open
-        await Browser.close()
+        await closeCapacitorBrowser()
 
         const url = new URL(data.url)
         const code = url.searchParams.get('code')
@@ -68,7 +71,7 @@ function LoginContent() {
 
     return () => {
       subscription.unsubscribe()
-      appListener.then(handle => handle.remove())
+      appListener.then(handle => handle?.remove?.())
     }
   }, [nextPath])
 
@@ -97,9 +100,10 @@ function LoginContent() {
 
   const handleOAuthLogin = async (provider) => {
     // Determine Redirect URL based on Platform
+    const isNativePlatform = await isCapacitorNativePlatform()
     let redirectUrl = `${window.location.origin}/auth/callback?next=${encodeURIComponent(nextPath)}`
     
-    if (Capacitor.isNativePlatform()) {
+    if (isNativePlatform) {
       redirectUrl = 'com.learnify.app://auth-callback'
     }
 
@@ -107,7 +111,7 @@ function LoginContent() {
       provider,
       options: {
         redirectTo: redirectUrl,
-        skipBrowserRedirect: Capacitor.isNativePlatform(),
+        skipBrowserRedirect: isNativePlatform,
       },
     })
 
@@ -117,9 +121,9 @@ function LoginContent() {
     }
 
     if (data?.url) {
-      if (Capacitor.isNativePlatform()) {
+      if (isNativePlatform) {
         try {
-          await Browser.open({ url: data.url })
+          await openCapacitorBrowser({ url: data.url })
         } catch (e) {
           console.error("Browser open failed", e)
           // Fallback if browser plugin fails for some reason (though it shouldn't if installed)

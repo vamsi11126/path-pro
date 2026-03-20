@@ -3,9 +3,6 @@
 import { Suspense, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import { App } from '@capacitor/app'
-import { Browser } from '@capacitor/browser'
-import { Capacitor } from '@capacitor/core'
 import { ArrowLeft, Github, Loader2, Mail, Sparkles } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -22,6 +19,12 @@ import {
 import { GoogleIcon } from '@/components/ui/icons'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import {
+  addCapacitorAppListener,
+  closeCapacitorBrowser,
+  isCapacitorNativePlatform,
+  openCapacitorBrowser
+} from '@/lib/capacitor/client'
 import { createClient } from '@/lib/supabase/client'
 
 function SignupContent() {
@@ -54,12 +57,12 @@ function SignupContent() {
       }
     })
 
-    const appListener = App.addListener('appUrlOpen', async (data) => {
+    const appListener = addCapacitorAppListener('appUrlOpen', async (data) => {
       if (!data.url.includes('auth-callback')) {
         return
       }
 
-      await Browser.close()
+      await closeCapacitorBrowser()
 
       const url = new URL(data.url)
       const code = url.searchParams.get('code')
@@ -81,7 +84,7 @@ function SignupContent() {
 
     return () => {
       subscription.unsubscribe()
-      appListener.then((handle) => handle.remove())
+      appListener.then((handle) => handle?.remove?.())
     }
   }, [nextPath, router, supabase.auth])
 
@@ -90,8 +93,9 @@ function SignupContent() {
     setLoading(true)
 
     try {
+      const isNativePlatform = await isCapacitorNativePlatform()
       let emailRedirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(nextPath)}`
-      if (Capacitor.isNativePlatform()) {
+      if (isNativePlatform) {
         emailRedirectTo = 'com.learnify.app://auth-callback'
       }
 
@@ -117,9 +121,10 @@ function SignupContent() {
   }
 
   const handleOAuthLogin = async (provider) => {
+    const isNativePlatform = await isCapacitorNativePlatform()
     let redirectUrl = `${window.location.origin}/auth/callback?next=${encodeURIComponent(nextPath)}`
 
-    if (Capacitor.isNativePlatform()) {
+    if (isNativePlatform) {
       redirectUrl = 'com.learnify.app://auth-callback'
     }
 
@@ -140,9 +145,9 @@ function SignupContent() {
       return
     }
 
-    if (Capacitor.isNativePlatform()) {
+    if (isNativePlatform) {
       try {
-        await Browser.open({ url: data.url })
+        await openCapacitorBrowser({ url: data.url })
       } catch (browserError) {
         console.error('Browser open failed', browserError)
         window.location.href = data.url
