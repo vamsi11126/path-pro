@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { Activity, AlertTriangle, ArrowLeft, BookOpen, ClipboardCheck, Clock3, RotateCcw, Search, Target, TrendingDown, TrendingUp, Users } from 'lucide-react'
+import { Activity, AlertTriangle, ArrowLeft, BookOpen, ClipboardCheck, Clock3, Crown, RotateCcw, Save, Search, Target, TrendingDown, TrendingUp, Users } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -11,7 +11,8 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Input } from '@/components/ui/input'
 import { Progress } from '@/components/ui/progress'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { formatIst } from '@/lib/classrooms/format'
+import { Textarea } from '@/components/ui/textarea'
+import { formatInTimeZone, formatIst } from '@/lib/classrooms/format'
 
 function formatMinutes(minutes = 0) {
   return minutes >= 60 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : `${minutes}m`
@@ -26,6 +27,23 @@ function formatIdle(idleDays) {
   if (idleDays <= 0) return 'Active today'
   if (idleDays === 1) return 'Active 1 day ago'
   return `Active ${idleDays} days ago`
+}
+
+function formatRewardWeek(reward, timeZone) {
+  if (!reward?.weekStart || !reward?.weekEnd) {
+    return 'this week'
+  }
+
+  const start = formatInTimeZone(reward.weekStart, timeZone, {
+    dateStyle: 'medium',
+    timeStyle: undefined
+  })
+  const end = formatInTimeZone(reward.weekEnd, timeZone, {
+    dateStyle: 'medium',
+    timeStyle: undefined
+  })
+
+  return `${start} to ${end}`
 }
 
 function getAttentionClasses(level) {
@@ -68,6 +86,11 @@ export default function TeacherClassroomAnalyticsPage() {
   })
   const [selectedStudentId, setSelectedStudentId] = useState(null)
   const [query, setQuery] = useState('')
+  const [rewardForm, setRewardForm] = useState({
+    rewardTitle: '',
+    teacherNote: ''
+  })
+  const [savingReward, setSavingReward] = useState(false)
 
   useEffect(() => {
     const load = async () => {
@@ -112,12 +135,26 @@ export default function TeacherClassroomAnalyticsPage() {
     load()
   }, [params.classroomId, router])
 
+  const activeBadge = analytics?.rewards?.activeBadge || null
+  const editableAward = activeBadge || analytics?.rewards?.history?.[0] || null
+  const currentWeekLeaderboard = analytics?.rewards?.currentWeek?.leaderboard || []
+
+  useEffect(() => {
+    setRewardForm({
+      rewardTitle: editableAward?.rewardTitle || '',
+      teacherNote: editableAward?.teacherNote || ''
+    })
+  }, [editableAward?.id, editableAward?.rewardTitle, editableAward?.teacherNote])
+
   const spotlightStudent = useMemo(() => (
+    (activeBadge
+      ? analytics?.students?.find((student) => student.studentUserId === activeBadge.winnerStudentUserId)
+      : null) ||
     analytics?.insights?.attentionStudents?.[0] ||
     analytics?.insights?.momentumLeader ||
     analytics?.insights?.topPerformer ||
     null
-  ), [analytics])
+  ), [activeBadge, analytics])
 
   const students = useMemo(() => {
     const search = query.trim().toLowerCase()
@@ -135,6 +172,52 @@ export default function TeacherClassroomAnalyticsPage() {
   const selectedStudent = useMemo(() => (
     analytics?.students?.find((student) => student.studentUserId === selectedStudentId) || null
   ), [analytics, selectedStudentId])
+
+  const handleSaveReward = async () => {
+    if (!editableAward) {
+      return
+    }
+
+    setSavingReward(true)
+
+    try {
+      const response = await fetch(`/api/teacher/classrooms/${params.classroomId}/rewards/${encodeURIComponent(editableAward.weekStartKey)}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(rewardForm)
+      })
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to save reward details')
+      }
+
+      setAnalytics((current) => {
+        if (!current) {
+          return current
+        }
+
+        return {
+          ...current,
+          rewards: {
+            ...current.rewards,
+            activeBadge: current.rewards?.activeBadge?.id === data.award.id ? data.award : current.rewards?.activeBadge,
+            history: (current.rewards?.history || []).map((award) => (
+              award.id === data.award.id ? data.award : award
+            ))
+          }
+        }
+      })
+
+      toast.success('Reward details saved')
+    } catch (error) {
+      toast.error(error.message)
+    } finally {
+      setSavingReward(false)
+    }
+  }
 
   if (loading || !analytics) {
     return <div className="text-muted-foreground">Loading analytics...</div>
@@ -182,7 +265,15 @@ export default function TeacherClassroomAnalyticsPage() {
                     <CardDescription>{spotlightStudent.attention?.level === 'on-track' ? 'Class spotlight' : 'Priority student'}</CardDescription>
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <CardTitle className="text-xl">{spotlightStudent.name}</CardTitle>
+                        <CardTitle className="flex items-center gap-2 text-xl">
+                          {spotlightStudent.name}
+                          {spotlightStudent.isActiveBadgeHolder && (
+                            <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+                              <Crown className="mr-1 h-3.5 w-3.5" />
+                              Weekly Star
+                            </Badge>
+                          )}
+                        </CardTitle>
                         <div className="mt-2 text-sm text-muted-foreground">{spotlightStudent.educationLevel || 'Education level not set'}</div>
                       </div>
                       <Badge variant="outline" className={getAttentionClasses(spotlightStudent.attention?.level)}>
@@ -245,7 +336,15 @@ export default function TeacherClassroomAnalyticsPage() {
                           <CardHeader className="space-y-4">
                             <div className="flex items-start justify-between gap-3">
                               <div>
-                                <CardTitle className="text-xl">{student.name}</CardTitle>
+                                <CardTitle className="flex items-center gap-2 text-xl">
+                                  {student.name}
+                                  {student.isActiveBadgeHolder && (
+                                    <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+                                      <Crown className="mr-1 h-3.5 w-3.5" />
+                                      Weekly Star
+                                    </Badge>
+                                  )}
+                                </CardTitle>
                                 <CardDescription className="mt-1">{student.educationLevel || 'Education level not set'}</CardDescription>
                               </div>
                               <Badge variant="outline" className={getAttentionClasses(student.attention.level)}>{student.attention.label}</Badge>
@@ -263,6 +362,11 @@ export default function TeacherClassroomAnalyticsPage() {
                               <div className="rounded-2xl border border-border/60 bg-background/75 p-3"><div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Last activity</div><div className="mt-1 text-sm font-semibold">{formatIdle(student.idleDays)}</div></div>
                             </div>
                             <div className="rounded-2xl border border-border/60 bg-background/75 p-3 text-sm text-muted-foreground">{student.attention.reasons?.[0] || student.attention.action}</div>
+                            {student.activeBadgeMeta?.rewardTitle && (
+                              <div className="rounded-2xl border border-amber-300/30 bg-amber-50/80 p-3 text-sm text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-200">
+                                {student.activeBadgeMeta.rewardTitle}
+                              </div>
+                            )}
                             <div className="flex items-center justify-between text-sm text-muted-foreground">
                               <div className="flex items-center gap-2"><TrendIcon className="h-4 w-4 text-primary" />{student.trend.label}</div>
                               <span>{student.trend.changePercentage > 0 ? '+' : ''}{student.trend.changePercentage}%</span>
@@ -273,6 +377,62 @@ export default function TeacherClassroomAnalyticsPage() {
                       )
                     })}
                   </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-[24px] border-border/60 bg-card/80 backdrop-blur-sm">
+              <CardHeader>
+                <CardTitle>Weekly leaderboard</CardTitle>
+                <CardDescription>
+                  Live rankings for {formatRewardWeek(analytics.rewards?.currentWeek, analytics.classroom.timezone)}.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {currentWeekLeaderboard.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-border/60 bg-card/70 p-6 text-sm text-muted-foreground">
+                    No qualifying classroom activity has been recorded for this week yet.
+                  </div>
+                ) : (
+                  currentWeekLeaderboard.slice(0, 6).map((entry) => (
+                    <div key={entry.studentUserId} className="rounded-2xl border border-border/60 bg-background/75 p-4">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <div className="rounded-full border border-border/60 bg-card px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                              #{entry.rank}
+                            </div>
+                            <div className="font-medium text-foreground">{entry.name}</div>
+                          </div>
+                          <div className="mt-2 text-sm text-muted-foreground">
+                            {entry.activeDays} active days • {formatMinutes(entry.weeklyLearningMinutes)} learning • {entry.assessmentSubmissions} assessment submission{entry.assessmentSubmissions === 1 ? '' : 's'}
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-2xl font-semibold text-foreground">{entry.totalScore}</div>
+                          <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Score</div>
+                        </div>
+                      </div>
+                      <div className="mt-4 grid grid-cols-1 gap-3 text-sm sm:grid-cols-4">
+                        <div className="rounded-xl border border-border/60 bg-card/80 px-3 py-2">
+                          <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Consistency</div>
+                          <div className="mt-1 font-semibold">{entry.scoreBreakdown.studyConsistency}</div>
+                        </div>
+                        <div className="rounded-xl border border-border/60 bg-card/80 px-3 py-2">
+                          <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Reading</div>
+                          <div className="mt-1 font-semibold">{entry.scoreBreakdown.courseReading}</div>
+                        </div>
+                        <div className="rounded-xl border border-border/60 bg-card/80 px-3 py-2">
+                          <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Review</div>
+                          <div className="mt-1 font-semibold">{entry.scoreBreakdown.reviewDiscipline}</div>
+                        </div>
+                        <div className="rounded-xl border border-border/60 bg-card/80 px-3 py-2">
+                          <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Assignments</div>
+                          <div className="mt-1 font-semibold">{entry.scoreBreakdown.assignmentContribution.total}</div>
+                        </div>
+                      </div>
+                    </div>
+                  ))
                 )}
               </CardContent>
             </Card>
@@ -353,6 +513,65 @@ export default function TeacherClassroomAnalyticsPage() {
           <div className="space-y-4">
             <Card className="rounded-[24px] border-border/60 bg-card/80 backdrop-blur-sm">
               <CardHeader>
+                <CardTitle>Badge spotlight</CardTitle>
+                <CardDescription>
+                  {activeBadge
+                    ? `Winner for ${formatRewardWeek(activeBadge, analytics.classroom.timezone)}`
+                    : 'The next badge appears after a weekly winner is finalized.'}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {activeBadge ? (
+                  <>
+                    <div className="rounded-2xl border border-amber-300/30 bg-amber-50/80 p-4 dark:border-amber-500/20 dark:bg-amber-500/10">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="flex items-center gap-2 font-medium text-foreground">
+                            <Crown className="h-4 w-4 text-amber-500" />
+                            {activeBadge.winnerName}
+                          </div>
+                          <div className="mt-1 text-sm text-muted-foreground">
+                            Badge active until {formatInTimeZone(new Date(new Date(activeBadge.badgeActiveTo).getTime() - 1), analytics.classroom.timezone)}
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-xl font-semibold text-foreground">{activeBadge.winnerScore}</div>
+                          <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Score</div>
+                        </div>
+                      </div>
+                      {activeBadge.rewardTitle && <div className="mt-3 text-sm font-medium text-foreground">{activeBadge.rewardTitle}</div>}
+                      {activeBadge.teacherNote && <div className="mt-2 text-sm text-muted-foreground">{activeBadge.teacherNote}</div>}
+                    </div>
+
+                    <div className="space-y-3">
+                      <Input
+                        value={rewardForm.rewardTitle}
+                        onChange={(event) => setRewardForm((current) => ({ ...current, rewardTitle: event.target.value }))}
+                        placeholder="Reward title, prize, or recognition"
+                        className="border-border/60 bg-background/75"
+                      />
+                      <Textarea
+                        value={rewardForm.teacherNote}
+                        onChange={(event) => setRewardForm((current) => ({ ...current, teacherNote: event.target.value }))}
+                        placeholder="Add a short note for the winner"
+                        className="min-h-[120px] border-border/60 bg-background/75"
+                      />
+                      <Button className="w-full" onClick={handleSaveReward} disabled={savingReward}>
+                        <Save className="mr-2 h-4 w-4" />
+                        {savingReward ? 'Saving...' : 'Save Reward Details'}
+                      </Button>
+                    </div>
+                  </>
+                ) : (
+                  <div className="rounded-2xl border border-dashed border-border/60 bg-card/70 p-6 text-sm text-muted-foreground">
+                    No finalized weekly winner is active yet. Once a week closes and a topper is computed, the badge and reward note controls will appear here.
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-[24px] border-border/60 bg-card/80 backdrop-blur-sm">
+              <CardHeader>
                 <CardTitle>Topic hotspots</CardTitle>
                 <CardDescription>Low-quality or overdue topics to reteach first.</CardDescription>
               </CardHeader>
@@ -425,7 +644,15 @@ export default function TeacherClassroomAnalyticsPage() {
                 <DialogHeader className="text-left">
                   <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                     <div>
-                      <DialogTitle className="text-xl sm:text-2xl">{selectedStudent.name}</DialogTitle>
+                      <DialogTitle className="flex items-center gap-2 text-xl sm:text-2xl">
+                        {selectedStudent.name}
+                        {selectedStudent.isActiveBadgeHolder && (
+                          <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+                            <Crown className="mr-1 h-3.5 w-3.5" />
+                            Weekly Star
+                          </Badge>
+                        )}
+                      </DialogTitle>
                       <DialogDescription className="mt-2">{selectedStudent.attention.action} {selectedStudent.educationLevel ? `Student level: ${selectedStudent.educationLevel}.` : ''}</DialogDescription>
                     </div>
                     <Badge variant="outline" className={getAttentionClasses(selectedStudent.attention.level)}>{selectedStudent.attention.label}</Badge>

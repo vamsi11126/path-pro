@@ -9,6 +9,7 @@ import {
   BookOpen,
   ChartColumn,
   ClipboardCheck,
+  Crown,
   Layers3,
   Mail,
   Plus,
@@ -363,8 +364,16 @@ export default function TeacherClassroomDetailPage() {
                 recentMembers.map((member) => (
                   <div key={member.id} className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3">
                     <div className="min-w-0">
-                      <div className="truncate font-medium text-foreground">
-                        {member.profile?.full_name || member.profile?.username || 'Student'}
+                      <div className="flex items-center gap-2">
+                        <div className="truncate font-medium text-foreground">
+                          {member.profile?.full_name || member.profile?.username || 'Student'}
+                        </div>
+                        {member.isActiveBadgeHolder && (
+                          <div className="rounded-full border border-amber-400/20 bg-amber-400/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-amber-200">
+                            <Crown className="mr-1 inline h-3 w-3" />
+                            Star
+                          </div>
+                        )}
                       </div>
                       <div className="truncate text-sm text-muted-foreground">
                         {member.profile?.education_level || 'Education level not set'}

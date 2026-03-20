@@ -10,8 +10,9 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from 'sonner'
-import { ArrowLeft, User, BookOpen, Briefcase, GraduationCap } from 'lucide-react'
+import { ArrowLeft, BookOpen, Briefcase, Crown, GraduationCap, User } from 'lucide-react'
 import { getLearningStyleUiOptions } from '@/lib/learning-styles/recipes'
+import { formatInTimeZone } from '@/lib/classrooms/format'
 
 const learningStyleOptions = getLearningStyleUiOptions()
 
@@ -31,6 +32,7 @@ function ProfilePageContent() {
   const searchParams = useSearchParams()
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [rewards, setRewards] = useState([])
   const [formData, setFormData] = useState({
     full_name: '',
     education_level: '',
@@ -52,9 +54,13 @@ function ProfilePageContent() {
           return
         }
 
-        const response = await fetch('/api/user/profile')
-        if (response.ok) {
-          const data = await response.json()
+        const [profileResponse, rewardsResponse] = await Promise.all([
+          fetch('/api/user/profile'),
+          fetch('/api/classrooms/my/rewards')
+        ])
+
+        if (profileResponse.ok) {
+          const data = await profileResponse.json()
           if (data) {
             setFormData({
               full_name: data.full_name || '',
@@ -65,6 +71,11 @@ function ProfilePageContent() {
               learning_schedule: data.learning_schedule || ''
             })
           }
+        }
+
+        if (rewardsResponse.ok) {
+          const rewardPayload = await rewardsResponse.json()
+          setRewards(rewardPayload.rewards || [])
         }
       } catch (error) {
         console.error('Error fetching profile:', error)
@@ -144,6 +155,39 @@ function ProfilePageContent() {
 
         <form onSubmit={handleSubmit}>
           <div className="grid gap-6">
+            {rewards.length > 0 && (
+              <Card className="glass-card border-amber-300/20 bg-amber-500/5">
+                <CardHeader>
+                  <div className="flex items-center gap-2">
+                    <Crown className="h-5 w-5 text-amber-500" />
+                    <CardTitle>Active Classroom Rewards</CardTitle>
+                  </div>
+                  <CardDescription>Your current classroom badges stay visible until the next weekly winner is finalized.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {rewards.map((reward) => (
+                    <div key={reward.id} className="rounded-3xl border border-amber-300/20 bg-amber-50/70 p-4 dark:border-amber-500/20 dark:bg-amber-500/10">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <div className="text-sm uppercase tracking-[0.2em] text-amber-700 dark:text-amber-200">Weekly Star</div>
+                          <div className="mt-1 text-lg font-semibold text-foreground">{reward.classroomName}</div>
+                          <div className="mt-1 text-sm text-muted-foreground">
+                            Active until {formatInTimeZone(new Date(new Date(reward.badgeActiveTo).getTime() - 1), reward.classroomTimeZone)}
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-2xl font-semibold text-foreground">{reward.winnerScore}</div>
+                          <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Score</div>
+                        </div>
+                      </div>
+                      {reward.rewardTitle && <div className="mt-3 font-medium text-foreground">{reward.rewardTitle}</div>}
+                      {reward.teacherNote && <div className="mt-2 text-sm text-muted-foreground">{reward.teacherNote}</div>}
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            )}
+
             {/* Personal Info Card */}
             <Card className="glass-card border-white/10">
               <CardHeader>

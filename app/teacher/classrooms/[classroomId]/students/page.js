@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import {
   ArrowLeft,
   Copy,
+  Crown,
   Link2,
   Mail,
   Send,
@@ -78,6 +79,7 @@ export default function TeacherClassroomStudentsPage() {
     () => detail?.invites?.filter((invite) => invite.status === 'pending') || [],
     [detail]
   )
+  const activeBadge = detail?.rewards?.activeBadge || null
 
   const handleInvite = async () => {
     if (!emailInput.trim()) {
@@ -270,6 +272,23 @@ export default function TeacherClassroomStudentsPage() {
                 </CardHeader>
               </Card>
             </div>
+
+            {activeBadge && (
+              <Card className="border-amber-300/20 bg-amber-400/10 shadow-none">
+                <CardHeader className="pb-3">
+                  <CardDescription className="text-amber-100/80">Current badge holder</CardDescription>
+                  <CardTitle className="flex items-center gap-2 text-xl text-white">
+                    <Crown className="h-5 w-5 text-amber-200" />
+                    {activeBadge.winnerName}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2 text-sm text-amber-50/90">
+                  <p>{activeBadge.rewardTitle || 'Weekly topper badge is active for this classroom right now.'}</p>
+                  <p>Score {activeBadge.winnerScore}</p>
+                  {activeBadge.teacherNote && <p className="text-amber-100/75">{activeBadge.teacherNote}</p>}
+                </CardContent>
+              </Card>
+            )}
           </div>
         </section>
 
@@ -300,6 +319,12 @@ export default function TeacherClassroomStudentsPage() {
                               <div className="text-base font-semibold">
                                 {member.profile?.full_name || member.profile?.username || 'Student'}
                               </div>
+                              {member.isActiveBadgeHolder && (
+                                <Badge variant="outline" className="border-amber-300/30 bg-amber-400/15 text-amber-50">
+                                  <Crown className="mr-1 h-3.5 w-3.5" />
+                                  Weekly Star
+                                </Badge>
+                              )}
                               <Badge variant="outline" className="border-emerald-500/20 bg-emerald-500/10 text-emerald-200">
                                 Active
                               </Badge>
@@ -310,7 +335,13 @@ export default function TeacherClassroomStudentsPage() {
                             <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
                               <span>{member.profile?.education_level || 'Education level not set'}</span>
                               <span>Joined {formatIst(member.joined_at)}</span>
+                              {member.activeBadgeMeta && <span>Reward score {member.activeBadgeMeta.winnerScore}</span>}
                             </div>
+                            {member.activeBadgeMeta?.rewardTitle && (
+                              <div className="text-xs text-amber-100/80">
+                                {member.activeBadgeMeta.rewardTitle}
+                              </div>
+                            )}
                           </div>
 
                           <Button
