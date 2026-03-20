@@ -60,6 +60,15 @@ The platform is built around 8 core features:
 * **AI Models**: OpenRouter API  
 * **Algorithms**: Custom DAG Unlocking Engine, SM-2 Spaced Repetition
 
+## **Runtime Strategy**
+
+For browser-based code execution, keep the runtime stack simple:
+
+* **JavaScript / TypeScript**: WebContainers  
+* **Python**: Pyodide  
+
+See `docs/RUNTIME STRATEGY.md` for the implementation rules and scope boundaries.
+
 ## **🚀 Getting Started**
 
 ### **Prerequisites**

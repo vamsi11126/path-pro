@@ -19,10 +19,23 @@ import { Label } from '@/components/ui/label'
 import { Progress } from '@/components/ui/progress'
 import { Textarea } from '@/components/ui/textarea'
 import { formatIst } from '@/lib/classrooms/format'
+import CodingPlayground from '@/components/classrooms/CodingPlayground'
+
+function isCodingQuestion(question) {
+  return question?.display_question_type === 'coding'
+}
 
 function buildAnswerState(questions = []) {
   return questions.reduce((accumulator, question) => {
     const answer = question.answer
+
+    if (isCodingQuestion(question)) {
+      accumulator[question.id] = {
+        answerText: answer?.answer_text || question.starter_code || '',
+        answerJson: answer?.answer_json || {}
+      }
+      return accumulator
+    }
 
     if (question.question_type === 'mcq' || question.question_type === 'true_false') {
       accumulator[question.id] = {
@@ -85,6 +98,7 @@ export default function ClassroomAssessmentAttemptPage() {
   const [remainingMs, setRemainingMs] = useState(null)
   const [warnings, setWarnings] = useState([])
   const autoSubmittedRef = useRef(false)
+  const saveTimersRef = useRef({})
 
   const loadSession = useCallback(async () => {
     try {
@@ -122,12 +136,13 @@ export default function ClassroomAssessmentAttemptPage() {
   }, [currentAttempt?.id])
   const questionProgress = useMemo(() => {
     const questions = session?.questions || []
-    const answered = questions.filter((question) => {
-      const answer = answers[question.id]
-      if (!answer) return false
-      if (question.question_type === 'mcq' || question.question_type === 'true_false') return Boolean(answer.selectedOptionId)
-      if (question.question_type === 'multi_select') return (answer.selectedOptionIds || []).length > 0
-      if (question.question_type === 'numeric') return answer.numericAnswer !== '' && answer.numericAnswer !== null && answer.numericAnswer !== undefined
+      const answered = questions.filter((question) => {
+        const answer = answers[question.id]
+        if (!answer) return false
+        if (isCodingQuestion(question)) return Boolean(answer.answerText?.trim())
+        if (question.question_type === 'mcq' || question.question_type === 'true_false') return Boolean(answer.selectedOptionId)
+        if (question.question_type === 'multi_select') return (answer.selectedOptionIds || []).length > 0
+        if (question.question_type === 'numeric') return answer.numericAnswer !== '' && answer.numericAnswer !== null && answer.numericAnswer !== undefined
       if (question.question_type === 'match') return Object.keys(answer.answerJson || {}).length > 0
       return Boolean(answer.answerText?.trim())
     }).length
@@ -139,6 +154,36 @@ export default function ClassroomAssessmentAttemptPage() {
     }
   }, [answers, session?.questions])
 
+  const persistAnswer = useCallback(async (question, nextValue) => {
+    if (!currentAttempt) {
+      return
+    }
+
+    setSavingQuestionId(question.id)
+
+    try {
+      const response = await fetch(`/api/classrooms/${params.classroomId}/assessments/${params.assessmentId}/attempts/${currentAttempt.id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          questionId: question.id,
+          ...nextValue
+        })
+      })
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to save answer')
+      }
+    } catch (error) {
+      toast.error(error.message)
+    } finally {
+      setSavingQuestionId(null)
+    }
+  }, [currentAttempt, params.assessmentId, params.classroomId])
+
   const handleSubmit = useCallback(async (isAutomatic = false) => {
     if (!currentAttempt) {
       return
@@ -147,6 +192,19 @@ export default function ClassroomAssessmentAttemptPage() {
     setSubmitting(true)
 
     try {
+      const pendingTimers = { ...saveTimersRef.current }
+      Object.values(pendingTimers).forEach((timerId) => clearTimeout(timerId))
+      saveTimersRef.current = {}
+
+      await Promise.all((session?.questions || []).map((question) => {
+        const answer = answers[question.id]
+        if (!answer || !(isCodingQuestion(question) || question.question_type === 'short_answer' || question.question_type === 'long_answer')) {
+          return Promise.resolve()
+        }
+
+        return persistAnswer(question, answer)
+      }))
+
       const response = await fetch(`/api/classrooms/${params.classroomId}/assessments/${params.assessmentId}/attempts/${currentAttempt.id}`, {
         method: 'POST'
       })
@@ -167,7 +225,7 @@ export default function ClassroomAssessmentAttemptPage() {
     } finally {
       setSubmitting(false)
     }
-  }, [currentAttempt, params.assessmentId, params.classroomId])
+  }, [answers, currentAttempt, params.assessmentId, params.classroomId, persistAnswer, session?.questions])
 
   const logIntegrityEvent = useCallback(async (eventType, severity = 'medium', details = {}) => {
     if (!currentAttempt) {
@@ -291,36 +349,6 @@ export default function ClassroomAssessmentAttemptPage() {
     }
   }
 
-  const persistAnswer = async (question, nextValue) => {
-    if (!currentAttempt) {
-      return
-    }
-
-    setSavingQuestionId(question.id)
-
-    try {
-      const response = await fetch(`/api/classrooms/${params.classroomId}/assessments/${params.assessmentId}/attempts/${currentAttempt.id}`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          questionId: question.id,
-          ...nextValue
-        })
-      })
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to save answer')
-      }
-    } catch (error) {
-      toast.error(error.message)
-    } finally {
-      setSavingQuestionId(null)
-    }
-  }
-
   const updateAnswer = async (question, nextValue) => {
     setAnswers((current) => ({
       ...current,
@@ -329,8 +357,27 @@ export default function ClassroomAssessmentAttemptPage() {
         ...nextValue
       }
     }))
-    await persistAnswer(question, nextValue)
+
+    const shouldDebounceSave = isCodingQuestion(question) || question.question_type === 'short_answer' || question.question_type === 'long_answer'
+
+    if (!shouldDebounceSave) {
+      await persistAnswer(question, nextValue)
+      return
+    }
+
+    if (saveTimersRef.current[question.id]) {
+      clearTimeout(saveTimersRef.current[question.id])
+    }
+
+    saveTimersRef.current[question.id] = setTimeout(() => {
+      persistAnswer(question, nextValue)
+      delete saveTimersRef.current[question.id]
+    }, 500)
   }
+
+  useEffect(() => () => {
+    Object.values(saveTimersRef.current).forEach((timerId) => clearTimeout(timerId))
+  }, [])
 
   if (loading || !session) {
     return <div className="text-muted-foreground">Loading assessment...</div>
@@ -352,7 +399,9 @@ export default function ClassroomAssessmentAttemptPage() {
             </Button>
             <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs uppercase tracking-[0.24em] text-muted-foreground">
               <ClipboardList className="h-3.5 w-3.5 text-primary" />
-              {session.assessment.assessment_type} assessment
+              {session.assessment.delivery_mode === 'coding'
+                ? `${session.assessment.coding_language} coding assignment`
+                : `${session.assessment.assessment_type} assessment`}
             </div>
             <h1 className="mt-4 text-3xl font-semibold tracking-tight md:text-4xl">{session.assessment.title}</h1>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground md:text-base">
@@ -527,7 +576,47 @@ export default function ClassroomAssessmentAttemptPage() {
                         </div>
                       )}
 
-                      {(question.question_type === 'short_answer' || question.question_type === 'long_answer') && (
+                      {isCodingQuestion(question) && (
+                        <CodingPlayground
+                          language={question.coding_language || session.assessment.coding_language || 'javascript'}
+                          value={answers[question.id]?.answerText || ''}
+                          onChange={(nextCode) => updateAnswer(question, {
+                            answerText: nextCode,
+                            answerJson: {
+                              ...(answers[question.id]?.answerJson || {}),
+                              language: question.coding_language || session.assessment.coding_language || 'javascript'
+                            }
+                          })}
+                          onReset={() => updateAnswer(question, {
+                            answerText: question.starter_code || '',
+                            answerJson: {
+                              ...(answers[question.id]?.answerJson || {}),
+                              language: question.coding_language || session.assessment.coding_language || 'javascript'
+                            }
+                          })}
+                          onRunResult={(result) => {
+                            setAnswers((current) => ({
+                              ...current,
+                              [question.id]: {
+                                ...(current[question.id] || {}),
+                                answerJson: {
+                                  ...(current[question.id]?.answerJson || {}),
+                                  language: question.coding_language || session.assessment.coding_language || 'javascript',
+                                  lastRunOutput: result.output,
+                                  lastRunStatus: result.status
+                                }
+                              }
+                            }))
+                          }}
+                          title="Code editor"
+                          description="Edit the code, run it in the browser, and submit the version you want graded."
+                          placeholder={question.starter_code || 'Write your solution here...'}
+                          showReset
+                          resetLabel="Reset starter"
+                        />
+                      )}
+
+                      {!isCodingQuestion(question) && (question.question_type === 'short_answer' || question.question_type === 'long_answer') && (
                         <Textarea
                           value={answers[question.id]?.answerText || ''}
                           onChange={(event) => updateAnswer(question, { answerText: event.target.value })}

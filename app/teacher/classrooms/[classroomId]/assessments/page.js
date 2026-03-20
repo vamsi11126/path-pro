@@ -8,6 +8,7 @@ import {
   Brain,
   ClipboardCheck,
   Clock3,
+  Code2,
   Plus,
   ShieldCheck,
   Sparkles
@@ -29,6 +30,8 @@ import { Textarea } from '@/components/ui/textarea'
 import { formatIst } from '@/lib/classrooms/format'
 
 const initialForm = {
+  deliveryMode: 'standard',
+  codingLanguage: 'javascript',
   creationMethod: 'manual',
   title: '',
   description: '',
@@ -123,6 +126,10 @@ export default function TeacherAssessmentListPage() {
         closeAt: form.closeAt || null,
         strictMode: form.strictMode,
         showResultsImmediately: form.showResultsImmediately,
+        metadata: {
+          deliveryMode: form.deliveryMode,
+          codingLanguage: form.deliveryMode === 'coding' ? form.codingLanguage : null
+        },
         creationMethod: form.creationMethod,
         generatorConfig: form.creationMethod === 'ai'
           ? {
@@ -202,6 +209,32 @@ export default function TeacherAssessmentListPage() {
                 </DialogHeader>
 
                 <div className="space-y-5 py-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="assignment-type">Assignment type</Label>
+                    <select
+                      id="assignment-type"
+                      value={form.deliveryMode}
+                      onChange={(event) => {
+                        const nextMode = event.target.value === 'coding' ? 'coding' : 'standard'
+                        setForm((current) => ({
+                          ...current,
+                          deliveryMode: nextMode,
+                          creationMethod: nextMode === 'coding' ? 'manual' : current.creationMethod
+                        }))
+                      }}
+                      className="flex h-11 w-full rounded-xl border border-white/10 bg-background/80 px-3 py-2 text-sm outline-none focus:border-primary/40"
+                    >
+                      <option value="standard">Standard Assessment</option>
+                      <option value="coding">Coding Assignment</option>
+                    </select>
+                  </div>
+
+                  {form.deliveryMode === 'coding' && (
+                    <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4 text-sm text-muted-foreground">
+                      Coding assignments are manual-only for now and support only <span className="font-medium text-foreground">Python</span> or <span className="font-medium text-foreground">JavaScript</span>.
+                    </div>
+                  )}
+
                   <div className="grid gap-3 sm:grid-cols-2">
                     <Button
                       variant={form.creationMethod === 'manual' ? 'default' : 'outline'}
@@ -214,6 +247,7 @@ export default function TeacherAssessmentListPage() {
                     <Button
                       variant={form.creationMethod === 'ai' ? 'default' : 'outline'}
                       className="justify-start"
+                      disabled={form.deliveryMode === 'coding'}
                       onClick={() => setForm((current) => ({ ...current, creationMethod: 'ai' }))}
                     >
                       <Sparkles className="mr-2 h-4 w-4" />
@@ -236,7 +270,7 @@ export default function TeacherAssessmentListPage() {
                     </div>
 
                     <div className="space-y-2">
-                      <Label htmlFor="assessment-type">Assessment type</Label>
+                      <Label htmlFor="assessment-type">Assessment category</Label>
                       <select
                         id="assessment-type"
                         value={form.assessmentType}
@@ -248,6 +282,21 @@ export default function TeacherAssessmentListPage() {
                         <option value="secure">Secure Assessment</option>
                       </select>
                     </div>
+
+                    {form.deliveryMode === 'coding' && (
+                      <div className="space-y-2">
+                        <Label htmlFor="coding-language">Coding language</Label>
+                        <select
+                          id="coding-language"
+                          value={form.codingLanguage}
+                          onChange={(event) => setForm((current) => ({ ...current, codingLanguage: event.target.value }))}
+                          className="flex h-11 w-full rounded-xl border border-white/10 bg-background/80 px-3 py-2 text-sm outline-none focus:border-primary/40"
+                        >
+                          <option value="javascript">JavaScript</option>
+                          <option value="python">Python</option>
+                        </select>
+                      </div>
+                    )}
 
                     <div className="space-y-2">
                       <Label htmlFor="assessment-course">Course</Label>
@@ -295,7 +344,7 @@ export default function TeacherAssessmentListPage() {
                     </label>
                   </div>
 
-                  {form.creationMethod === 'ai' && (
+                  {form.creationMethod === 'ai' && form.deliveryMode !== 'coding' && (
                     <div className="space-y-4 rounded-2xl border border-primary/20 bg-primary/5 p-4">
                       <div className="flex items-center gap-2 text-sm font-medium text-foreground">
                         <Brain className="h-4 w-4 text-primary" />
@@ -434,7 +483,11 @@ export default function TeacherAssessmentListPage() {
                 <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4 text-sm text-muted-foreground">
                   <div className="flex items-center gap-2 text-foreground">
                     {assessment.strict_mode ? <ShieldCheck className="h-4 w-4 text-primary" /> : <Clock3 className="h-4 w-4 text-primary" />}
-                    {assessment.assessment_type === 'secure' ? 'Secure assessment' : `${assessment.assessment_type} assessment`}
+                    {assessment.delivery_mode === 'coding'
+                      ? `${assessment.coding_language} coding assignment`
+                      : assessment.assessment_type === 'secure'
+                        ? 'Secure assessment'
+                        : `${assessment.assessment_type} assessment`}
                   </div>
                   <p className="mt-2">
                     {assessment.open_at

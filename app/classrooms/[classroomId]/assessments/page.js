@@ -158,7 +158,11 @@ export default function ClassroomAssessmentsPage() {
                 <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4 text-sm text-muted-foreground">
                   <div className="flex items-center gap-2 text-foreground">
                     {assessment.strict_mode ? <ShieldCheck className="h-4 w-4 text-primary" /> : <Sparkles className="h-4 w-4 text-primary" />}
-                    {assessment.assessment_type === 'secure' ? 'Secure assessment' : `${assessment.assessment_type} assessment`}
+                    {assessment.delivery_mode === 'coding'
+                      ? `${assessment.coding_language} coding assignment`
+                      : assessment.assessment_type === 'secure'
+                        ? 'Secure assessment'
+                        : `${assessment.assessment_type} assessment`}
                   </div>
                   <p className="mt-2">
                     {assessment.open_at ? `Opens ${formatIst(assessment.open_at)} IST` : 'Available immediately'}

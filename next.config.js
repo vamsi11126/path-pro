@@ -10,6 +10,11 @@ const withPWA = require("@ducanh2912/next-pwa").default({
   },
 });
 
+const runtimeExecutionHeaders = [
+  { key: "Cross-Origin-Embedder-Policy", value: "credentialless" },
+  { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
+]
+
 const nextConfig = {
   output: 'standalone',
   images: {
@@ -36,6 +41,22 @@ const nextConfig = {
   },
   async headers() {
     return [
+      {
+        source: "/learn/:path*",
+        headers: runtimeExecutionHeaders,
+      },
+      {
+        source: "/classrooms/:classroomId/courses/:classroomCourseId/learn/:path*",
+        headers: runtimeExecutionHeaders,
+      },
+      {
+        source: "/classrooms/:classroomId/assessments/:path*",
+        headers: runtimeExecutionHeaders,
+      },
+      {
+        source: "/teacher/classrooms/:classroomId/assessments/:path*",
+        headers: runtimeExecutionHeaders,
+      },
       {
         source: "/(.*)",
         headers: [

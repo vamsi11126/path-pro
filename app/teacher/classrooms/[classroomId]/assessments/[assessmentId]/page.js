@@ -7,6 +7,7 @@ import {
   ArrowLeft,
   CheckCircle2,
   ClipboardList,
+  Code2,
   Eye,
   Plus,
   ShieldCheck,
@@ -28,19 +29,31 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { formatIst } from '@/lib/classrooms/format'
+import CodingPlayground from '@/components/classrooms/CodingPlayground'
 
-const initialQuestionForm = {
-  questionType: 'mcq',
-  topicId: '',
-  prompt: '',
-  points: '1',
-  difficulty: '3',
-  answerExplanation: '',
-  optionsText: '',
-  correctAnswers: '',
-  numericAnswer: '',
-  numericTolerance: '0',
-  rubricText: ''
+function createInitialQuestionForm(detail = null) {
+  const assessment = detail?.assessment
+  const codingLanguage = assessment?.coding_language || 'javascript'
+  const defaultTopicId = detail?.availableTopics?.[0]?.id || ''
+  const isCodingAssessment = assessment?.delivery_mode === 'coding'
+
+  return {
+    questionType: isCodingAssessment ? 'coding' : 'mcq',
+    codingLanguage,
+    starterCode: '',
+    topicId: '',
+    prompt: '',
+    points: '1',
+    difficulty: '3',
+    answerExplanation: '',
+    optionsText: '',
+    correctAnswers: '',
+    numericAnswer: '',
+    numericTolerance: '0',
+    rubricText: '',
+    evaluationNotes: '',
+    ...(defaultTopicId ? { topicId: defaultTopicId } : {})
+  }
 }
 
 function formatAttemptScore(attempt) {
@@ -58,6 +71,10 @@ function formatAttemptScore(attempt) {
 function formatStudentAnswer(question) {
   const answer = question.answer
   if (!answer) return 'No answer'
+
+  if (question.display_question_type === 'coding') {
+    return answer.answer_text || 'No code submitted'
+  }
 
   if (question.question_type === 'mcq' || question.question_type === 'true_false') {
     return (question.options || [])
@@ -84,6 +101,102 @@ function formatStudentAnswer(question) {
   return answer.answer_text || 'No answer'
 }
 
+function getRubricItems(question) {
+  const rubricSource = question?.rubric?.rubric_json || question?.rubric || []
+  return Array.isArray(rubricSource) ? rubricSource : []
+}
+
+function getCorrectOptionTexts(question) {
+  return (question.options || [])
+    .filter((option) => option.is_correct)
+    .map((option) => option.option_text)
+}
+
+function buildTeacherReference(question) {
+  const rubricItems = getRubricItems(question)
+  const answerKey = question.answer_key || {}
+  const explanation = question.answer_explanation || ''
+
+  if (question.display_question_type === 'coding') {
+    return {
+      title: 'Teacher guide',
+      details: [
+        question.metadata?.evaluationNotes ? `Evaluation notes: ${question.metadata.evaluationNotes}` : null,
+        explanation ? `Explanation: ${explanation}` : null
+      ].filter(Boolean),
+      code: question.starter_code || '',
+      codeLabel: question.starter_code ? 'Starter code' : '',
+      rubricItems
+    }
+  }
+
+  if (question.question_type === 'mcq' || question.question_type === 'multi_select' || question.question_type === 'true_false') {
+    const correctOptions = getCorrectOptionTexts(question)
+    const correctValue = answerKey.correctValue
+
+    return {
+      title: 'Expected answer',
+      details: [
+        correctOptions.length > 0
+          ? `Correct option${correctOptions.length > 1 ? 's' : ''}: ${correctOptions.join(', ')}`
+          : correctValue !== undefined && correctValue !== null
+            ? `Correct answer: ${String(correctValue)}`
+            : null,
+        explanation ? `Explanation: ${explanation}` : null
+      ].filter(Boolean),
+      rubricItems
+    }
+  }
+
+  if (question.question_type === 'short_answer') {
+    const acceptedAnswers = Array.isArray(answerKey.acceptedAnswers) ? answerKey.acceptedAnswers : []
+    return {
+      title: 'Expected answer',
+      details: [
+        acceptedAnswers.length > 0 ? `Accepted answers: ${acceptedAnswers.join(', ')}` : null,
+        explanation ? `Explanation: ${explanation}` : null
+      ].filter(Boolean),
+      rubricItems
+    }
+  }
+
+  if (question.question_type === 'numeric') {
+    const numericAnswer = answerKey.numericAnswer
+    const tolerance = answerKey.tolerance
+
+    return {
+      title: 'Expected answer',
+      details: [
+        numericAnswer !== undefined && numericAnswer !== null ? `Expected value: ${numericAnswer}` : null,
+        tolerance !== undefined && tolerance !== null ? `Tolerance: ${tolerance}` : null,
+        explanation ? `Explanation: ${explanation}` : null
+      ].filter(Boolean),
+      rubricItems
+    }
+  }
+
+  if (question.question_type === 'match') {
+    const matches = answerKey.matches && typeof answerKey.matches === 'object'
+      ? Object.entries(answerKey.matches).map(([left, right]) => `${left} -> ${right}`)
+      : []
+
+    return {
+      title: 'Expected answer',
+      details: [
+        ...matches,
+        ...(explanation ? [`Explanation: ${explanation}`] : [])
+      ].filter(Boolean),
+      rubricItems
+    }
+  }
+
+  return {
+    title: 'Teacher guide',
+    details: explanation ? [`Explanation: ${explanation}`] : [],
+    rubricItems
+  }
+}
+
 function buildQuestionPayload(form) {
   const base = {
     questionType: form.questionType,
@@ -92,6 +205,30 @@ function buildQuestionPayload(form) {
     points: Number(form.points || 1),
     difficulty: Number(form.difficulty || 3),
     answerExplanation: form.answerExplanation
+  }
+
+  if (form.questionType === 'coding') {
+    return {
+      ...base,
+      rubric: form.rubricText
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .map((line) => {
+          const [criterion, points] = line.split('|').map((value) => value.trim())
+          return {
+            criterion: criterion || 'Criterion',
+            points: Number(points || 1),
+            description: criterion || 'Evaluate this criterion'
+          }
+        }),
+      metadata: {
+        interactionType: 'coding',
+        language: form.codingLanguage,
+        starterCode: form.starterCode,
+        evaluationNotes: form.evaluationNotes
+      }
+    }
   }
 
   if (form.questionType === 'numeric') {
@@ -197,7 +334,7 @@ export default function TeacherAssessmentDetailPage() {
   const [savingQuestion, setSavingQuestion] = useState(false)
   const [reviewing, setReviewing] = useState(false)
   const [detail, setDetail] = useState(null)
-  const [questionForm, setQuestionForm] = useState(initialQuestionForm)
+  const [questionForm, setQuestionForm] = useState(createInitialQuestionForm())
   const [isQuestionOpen, setIsQuestionOpen] = useState(false)
   const [reviewDialog, setReviewDialog] = useState({ open: false, attemptId: null, loading: false, data: null })
   const [reviewPayload, setReviewPayload] = useState({})
@@ -213,16 +350,20 @@ export default function TeacherAssessmentDetailPage() {
       }
 
       setDetail(data)
-      if (!questionForm.topicId && data.availableTopics?.[0]?.id) {
-        setQuestionForm((current) => ({ ...current, topicId: data.availableTopics[0].id }))
-      }
+      setQuestionForm((current) => ({
+        ...createInitialQuestionForm(data),
+        ...current,
+        questionType: data.assessment?.delivery_mode === 'coding' ? 'coding' : current.questionType,
+        codingLanguage: data.assessment?.coding_language || current.codingLanguage || 'javascript',
+        topicId: current.topicId || data.availableTopics?.[0]?.id || ''
+      }))
     } catch (error) {
       toast.error(error.message)
       router.push(`/teacher/classrooms/${params.classroomId}/assessments`)
     } finally {
       setLoading(false)
     }
-  }, [params.assessmentId, params.classroomId, questionForm.topicId, router])
+  }, [params.assessmentId, params.classroomId, router])
 
   useEffect(() => {
     loadDetail()
@@ -234,6 +375,7 @@ export default function TeacherAssessmentDetailPage() {
     pendingReview: detail?.assessment?.pendingReviewCount || 0,
     averageScore: detail?.assessment?.averageScore ?? 'N/A'
   }), [detail])
+  const isCodingAssessment = detail?.assessment?.delivery_mode === 'coding'
 
   const handlePublish = async () => {
     setPublishing(true)
@@ -284,7 +426,7 @@ export default function TeacherAssessmentDetailPage() {
 
       toast.success('Question added')
       setDetail(data)
-      setQuestionForm(initialQuestionForm)
+      setQuestionForm(createInitialQuestionForm(data))
       setIsQuestionOpen(false)
     } catch (error) {
       toast.error(error.message)
@@ -381,8 +523,8 @@ export default function TeacherAssessmentDetailPage() {
                   Back to Assessments
                 </Button>
                 <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs uppercase tracking-[0.24em] text-muted-foreground">
-                  <ClipboardList className="h-3.5 w-3.5 text-primary" />
-                  {detail.assessment.assessment_type} assessment
+                  {isCodingAssessment ? <Code2 className="h-3.5 w-3.5 text-primary" /> : <ClipboardList className="h-3.5 w-3.5 text-primary" />}
+                  {isCodingAssessment ? `${detail.assessment.coding_language} coding assignment` : `${detail.assessment.assessment_type} assessment`}
                 </div>
                 <h1 className="mt-4 text-3xl font-semibold tracking-tight md:text-4xl">{detail.assessment.title}</h1>
                 <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground md:text-base">
@@ -398,14 +540,16 @@ export default function TeacherAssessmentDetailPage() {
                   <DialogTrigger asChild>
                     <Button variant="outline" className="h-11 border-white/10 bg-white/5">
                       <Plus className="mr-2 h-4 w-4" />
-                      Add Question
+                      {isCodingAssessment ? 'Add Coding Prompt' : 'Add Question'}
                     </Button>
                   </DialogTrigger>
                   <DialogContent className="max-h-[90vh] overflow-y-auto border-white/10 bg-card sm:max-w-2xl">
                     <DialogHeader>
                       <DialogTitle>Add question</DialogTitle>
                       <DialogDescription>
-                        Build manual questions and attach them directly to the classroom assessment.
+                        {isCodingAssessment
+                          ? 'Create a coding prompt with starter code in Python or JavaScript.'
+                          : 'Build manual questions and attach them directly to the classroom assessment.'}
                       </DialogDescription>
                     </DialogHeader>
                     <div className="space-y-4 py-2">
@@ -415,23 +559,40 @@ export default function TeacherAssessmentDetailPage() {
                       </div>
 
                       <div className="grid gap-4 sm:grid-cols-2">
-                        <div className="space-y-2">
-                          <Label htmlFor="question-type">Type</Label>
-                          <select
-                            id="question-type"
-                            value={questionForm.questionType}
-                            onChange={(event) => setQuestionForm((current) => ({ ...current, questionType: event.target.value }))}
-                            className="flex h-11 w-full rounded-xl border border-white/10 bg-background/80 px-3 py-2 text-sm outline-none focus:border-primary/40"
-                          >
-                            <option value="mcq">MCQ</option>
-                            <option value="multi_select">Multi Select</option>
-                            <option value="true_false">True / False</option>
-                            <option value="short_answer">Short Answer</option>
-                            <option value="long_answer">Long Answer</option>
-                            <option value="numeric">Numeric</option>
-                            <option value="match">Match</option>
-                          </select>
-                        </div>
+                        {!isCodingAssessment && (
+                          <div className="space-y-2">
+                            <Label htmlFor="question-type">Type</Label>
+                            <select
+                              id="question-type"
+                              value={questionForm.questionType}
+                              onChange={(event) => setQuestionForm((current) => ({ ...current, questionType: event.target.value }))}
+                              className="flex h-11 w-full rounded-xl border border-white/10 bg-background/80 px-3 py-2 text-sm outline-none focus:border-primary/40"
+                            >
+                              <option value="mcq">MCQ</option>
+                              <option value="multi_select">Multi Select</option>
+                              <option value="true_false">True / False</option>
+                              <option value="short_answer">Short Answer</option>
+                              <option value="long_answer">Long Answer</option>
+                              <option value="numeric">Numeric</option>
+                              <option value="match">Match</option>
+                            </select>
+                          </div>
+                        )}
+
+                        {isCodingAssessment && (
+                          <div className="space-y-2">
+                            <Label htmlFor="coding-language">Language</Label>
+                            <select
+                              id="coding-language"
+                              value={questionForm.codingLanguage}
+                              onChange={(event) => setQuestionForm((current) => ({ ...current, codingLanguage: event.target.value }))}
+                              className="flex h-11 w-full rounded-xl border border-white/10 bg-background/80 px-3 py-2 text-sm outline-none focus:border-primary/40"
+                            >
+                              <option value="javascript">JavaScript</option>
+                              <option value="python">Python</option>
+                            </select>
+                          </div>
+                        )}
                         <div className="space-y-2">
                           <Label htmlFor="question-topic">Topic</Label>
                           <select
@@ -455,6 +616,32 @@ export default function TeacherAssessmentDetailPage() {
                           <Input id="question-difficulty" type="number" min="1" max="5" value={questionForm.difficulty} onChange={(event) => setQuestionForm((current) => ({ ...current, difficulty: event.target.value }))} />
                         </div>
                       </div>
+
+                      {isCodingAssessment && (
+                        <>
+                          <div className="space-y-2">
+                            <Label htmlFor="coding-starter-code">Starter code</Label>
+                            <Textarea
+                              id="coding-starter-code"
+                              value={questionForm.starterCode}
+                              onChange={(event) => setQuestionForm((current) => ({ ...current, starterCode: event.target.value }))}
+                              className="min-h-[180px] font-mono text-sm"
+                              placeholder={questionForm.codingLanguage === 'python'
+                                ? 'def solve():\n    # write your answer here\n    print("hello")'
+                                : 'function solve() {\n  // write your answer here\n  console.log("hello")\n}'}
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="coding-evaluation-notes">Evaluation notes</Label>
+                            <Textarea
+                              id="coding-evaluation-notes"
+                              value={questionForm.evaluationNotes}
+                              onChange={(event) => setQuestionForm((current) => ({ ...current, evaluationNotes: event.target.value }))}
+                              placeholder="What should a strong solution demonstrate?"
+                            />
+                          </div>
+                        </>
+                      )}
 
                       {(questionForm.questionType === 'mcq' || questionForm.questionType === 'multi_select' || questionForm.questionType === 'true_false' || questionForm.questionType === 'match') && (
                         <div className="space-y-2">
@@ -487,7 +674,7 @@ export default function TeacherAssessmentDetailPage() {
                         </div>
                       )}
 
-                      {questionForm.questionType === 'long_answer' && (
+                      {(questionForm.questionType === 'long_answer' || questionForm.questionType === 'coding') && (
                         <div className="space-y-2">
                           <Label htmlFor="rubric-text">Rubric lines (&quot;Criterion | Points&quot;)</Label>
                           <Textarea id="rubric-text" value={questionForm.rubricText} onChange={(event) => setQuestionForm((current) => ({ ...current, rubricText: event.target.value }))} />
@@ -566,16 +753,27 @@ export default function TeacherAssessmentDetailPage() {
                           <div className="text-xs uppercase tracking-[0.22em] text-muted-foreground">Question {index + 1}</div>
                           <div className="mt-2 font-medium text-foreground">{question.prompt}</div>
                           <div className="mt-2 flex flex-wrap gap-3 text-xs text-muted-foreground">
-                            <span>{question.question_type}</span>
+                            <span>{question.display_question_type}</span>
+                            {question.coding_language && <span>{question.coding_language}</span>}
                             <span>{question.points} pt</span>
                             <span>Difficulty {question.difficulty}/5</span>
                             <span>{question.topic?.title || 'General'}</span>
                           </div>
                         </div>
                         <span className="rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
-                          {question.options?.length || 0} options
+                          {question.display_question_type === 'coding'
+                            ? 'Manual review'
+                            : `${question.options?.length || 0} options`}
                         </span>
                       </div>
+                      {question.display_question_type === 'coding' && question.starter_code && (
+                        <div className="mt-4 rounded-xl border border-white/10 bg-black/20 p-3">
+                          <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Starter code</div>
+                          <pre className="mt-2 whitespace-pre-wrap break-words font-mono text-xs leading-6 text-zinc-200">
+                            {question.starter_code}
+                          </pre>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -618,6 +816,17 @@ export default function TeacherAssessmentDetailPage() {
                       : 'Results stay hidden until the teacher finalizes them.'}
                   </p>
                 </div>
+                {isCodingAssessment && (
+                  <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+                    <div className="flex items-center gap-2 text-foreground">
+                      <Code2 className="h-4 w-4 text-primary" />
+                      Coding mode
+                    </div>
+                    <p className="mt-2">
+                      Students answer with runnable code. Supported language for this assignment: {detail.assessment.coding_language}.
+                    </p>
+                  </div>
+                )}
               </CardContent>
             </Card>
 
@@ -694,13 +903,91 @@ export default function TeacherAssessmentDetailPage() {
                     <CardHeader>
                       <CardTitle className="text-base">{question.prompt}</CardTitle>
                       <CardDescription>
-                        {question.question_type} • {question.points} point(s)
+                        {question.display_question_type} � {question.points} point(s)
                       </CardDescription>
+                      {question.coding_language && (
+                        <div className="text-xs text-muted-foreground">{question.coding_language}</div>
+                      )}
                     </CardHeader>
                     <CardContent className="space-y-4">
-                      <div className="rounded-xl border border-white/10 bg-black/10 p-3 text-sm text-muted-foreground">
-                        <div className="text-xs uppercase tracking-[0.2em] text-foreground">Student answer</div>
-                        <div className="mt-2 whitespace-pre-wrap">{formatStudentAnswer(question)}</div>
+                      <div className="grid gap-4 xl:grid-cols-2">
+                        {question.display_question_type === 'coding' ? (
+                          <CodingPlayground
+                            language={question.coding_language || 'javascript'}
+                            value={formatStudentAnswer(question)}
+                            readOnly
+                            title="Submitted solution"
+                            description="Review the student's code and optionally run it in the browser while grading."
+                            placeholder="No code submitted."
+                          />
+                        ) : (
+                          <div className="rounded-xl border border-white/10 bg-black/10 p-3 text-sm text-muted-foreground">
+                            <div className="text-xs uppercase tracking-[0.2em] text-foreground">Student answer</div>
+                            <div className="mt-2 whitespace-pre-wrap">{formatStudentAnswer(question)}</div>
+                          </div>
+                        )}
+
+                        {(() => {
+                          const reference = buildTeacherReference(question)
+                          const hasReferenceContent = reference.details.length > 0 || reference.rubricItems.length > 0 || Boolean(reference.code)
+
+                          if (!hasReferenceContent) {
+                            return (
+                              <div className="rounded-xl border border-dashed border-white/10 bg-white/[0.02] p-3 text-sm text-muted-foreground">
+                                <div className="text-xs uppercase tracking-[0.2em] text-foreground">Teacher guide</div>
+                                <div className="mt-2">No answer key or rubric has been added for this question yet.</div>
+                              </div>
+                            )
+                          }
+
+                          return (
+                            <div className="rounded-xl border border-primary/20 bg-primary/5 p-3 text-sm text-muted-foreground">
+                              <div className="text-xs uppercase tracking-[0.2em] text-foreground">{reference.title}</div>
+
+                              {reference.details.length > 0 && (
+                                <div className="mt-2 space-y-2">
+                                  {reference.details.map((detailLine, index) => (
+                                    <div key={`${question.id}-reference-${index}`} className="whitespace-pre-wrap">
+                                      {detailLine}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+
+                              {reference.code && (
+                                <div className="mt-3 rounded-xl border border-white/10 bg-black/20 p-3">
+                                  <div className="text-[11px] uppercase tracking-[0.2em] text-foreground">
+                                    {reference.codeLabel || 'Reference code'}
+                                  </div>
+                                  <pre className="mt-2 whitespace-pre-wrap break-words font-mono text-xs text-slate-100">
+                                    {reference.code}
+                                  </pre>
+                                </div>
+                              )}
+
+                              {reference.rubricItems.length > 0 && (
+                                <div className="mt-3 rounded-xl border border-white/10 bg-black/10 p-3">
+                                  <div className="text-[11px] uppercase tracking-[0.2em] text-foreground">Rubric</div>
+                                  <div className="mt-2 space-y-2">
+                                    {reference.rubricItems.map((item, index) => (
+                                      <div key={`${question.id}-rubric-${index}`} className="rounded-lg border border-white/10 bg-white/[0.03] p-2">
+                                        <div className="font-medium text-foreground">
+                                          {item.criterion || item.title || `Criterion ${index + 1}`}
+                                          {item.points !== undefined && item.points !== null ? ` (${item.points} pts)` : ''}
+                                        </div>
+                                        {(item.description || item.details) && (
+                                          <div className="mt-1 whitespace-pre-wrap text-xs text-muted-foreground">
+                                            {item.description || item.details}
+                                          </div>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )
+                        })()}
                       </div>
 
                       <div className="grid gap-4 sm:grid-cols-2">
@@ -785,3 +1072,4 @@ export default function TeacherAssessmentDetailPage() {
     </>
   )
 }
+

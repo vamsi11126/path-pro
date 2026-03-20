@@ -4,6 +4,8 @@ import { useState, useEffect, useRef, useId, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { Check, X, ZoomIn, ZoomOut, RotateCcw, PenLine, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
+import { normalizeRunnableLanguage } from '@/lib/code-runtime/languages'
+import RunnableCodePanel from '@/components/sub-components/RunnableCodePanel'
 
 export const cleanCodeContent = (content) => {
   let cleaned = String(content).replace(/\n$/, '')
@@ -736,6 +738,7 @@ export const MermaidDiagram = ({ code, allowAddToNotes = true }) => {
 const CodeBlock = ({ node, inline, className, children, allowAddToNotes = true, ...props }) => {
   const match = /language-(\w+)/.exec(className || '')
   const language = match ? match[1] : ''
+  const runnableLanguage = normalizeRunnableLanguage(language)
   const codeContent = cleanCodeContent(children)
   
   const [copied, setCopied] = useState(false)
@@ -837,6 +840,9 @@ const CodeBlock = ({ node, inline, className, children, allowAddToNotes = true, 
           {codeContent}
         </code>
       </div>
+      {runnableLanguage && (
+        <RunnableCodePanel code={codeContent} language={runnableLanguage} />
+      )}
     </div>
   )
 }
