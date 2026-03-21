@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
+import { isValidLearningStyle, normalizeLearningStyle } from '@/lib/learning-styles/constants'
 
 export async function GET(request) {
   const supabase = await createClient()
@@ -47,6 +48,10 @@ export async function PUT(request) {
         return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
     }
 
+    if (!isValidLearningStyle(preferred_learning_style)) {
+      return NextResponse.json({ error: 'Invalid learning style selection' }, { status: 400 })
+    }
+
     const { data: profile, error } = await supabase
       .from('profiles')
       .upsert({
@@ -54,7 +59,7 @@ export async function PUT(request) {
         full_name,
         education_level,
         learning_goals,
-        preferred_learning_style,
+        preferred_learning_style: normalizeLearningStyle(preferred_learning_style),
         learning_schedule,
         occupation,
         updated_at: new Date().toISOString()

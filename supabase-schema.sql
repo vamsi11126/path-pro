@@ -78,6 +78,27 @@ CREATE TABLE IF NOT EXISTS saved_graph_layouts (
   UNIQUE(subject_id, user_id)
 );
 
+-- Personalized topic tutorials
+CREATE TABLE IF NOT EXISTS topic_tutorial_variants (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  topic_id UUID NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  learning_style TEXT NOT NULL,
+  tutorial_version TEXT NOT NULL DEFAULT 'v1',
+  status TEXT NOT NULL DEFAULT 'ready',
+  tutorial_markdown TEXT NOT NULL,
+  tutorial_outline JSONB NOT NULL DEFAULT '[]'::jsonb,
+  tutorial_blocks JSONB NOT NULL DEFAULT '[]'::jsonb,
+  flashcards JSONB,
+  chat_starters JSONB,
+  review_prompts JSONB,
+  quality_report JSONB,
+  source_signature TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(topic_id, user_id, learning_style, tutorial_version)
+);
+
 -- Shared Subject Clones (for community feature)
 CREATE TABLE IF NOT EXISTS shared_subject_clones (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -97,6 +118,8 @@ CREATE INDEX IF NOT EXISTS idx_dependencies_depends_on ON topic_dependencies(dep
 CREATE INDEX IF NOT EXISTS idx_study_logs_user ON study_logs(user_id);
 CREATE INDEX IF NOT EXISTS idx_study_logs_topic ON study_logs(topic_id);
 CREATE INDEX IF NOT EXISTS idx_study_logs_created ON study_logs(created_at);
+CREATE INDEX IF NOT EXISTS idx_topic_tutorial_variants_user_updated ON topic_tutorial_variants(user_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_topic_tutorial_variants_topic_style ON topic_tutorial_variants(topic_id, learning_style);
 
 -- RLS Policies
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
@@ -105,63 +128,99 @@ ALTER TABLE topics ENABLE ROW LEVEL SECURITY;
 ALTER TABLE topic_dependencies ENABLE ROW LEVEL SECURITY;
 ALTER TABLE study_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE saved_graph_layouts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE topic_tutorial_variants ENABLE ROW LEVEL SECURITY;
 ALTER TABLE shared_subject_clones ENABLE ROW LEVEL SECURITY;
 
 -- Profiles policies
+DROP POLICY IF EXISTS "Users can view own profile" ON profiles;
 CREATE POLICY "Users can view own profile" ON profiles FOR SELECT USING (auth.uid() = id);
+DROP POLICY IF EXISTS "Users can insert own profile" ON profiles;
 CREATE POLICY "Users can insert own profile" ON profiles FOR INSERT WITH CHECK (auth.uid() = id);
+DROP POLICY IF EXISTS "Users can update own profile" ON profiles;
 CREATE POLICY "Users can update own profile" ON profiles FOR UPDATE USING (auth.uid() = id);
 
 -- Subjects policies
+DROP POLICY IF EXISTS "Users can view own subjects" ON subjects;
 CREATE POLICY "Users can view own subjects" ON subjects FOR SELECT USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Users can view public subjects" ON subjects;
 CREATE POLICY "Users can view public subjects" ON subjects FOR SELECT USING (is_public = true);
+DROP POLICY IF EXISTS "Users can insert own subjects" ON subjects;
 CREATE POLICY "Users can insert own subjects" ON subjects FOR INSERT WITH CHECK (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Users can update own subjects" ON subjects;
 CREATE POLICY "Users can update own subjects" ON subjects FOR UPDATE USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Users can delete own subjects" ON subjects;
 CREATE POLICY "Users can delete own subjects" ON subjects FOR DELETE USING (auth.uid() = user_id);
 
 -- Topics policies
+DROP POLICY IF EXISTS "Users can view own topics" ON topics;
 CREATE POLICY "Users can view own topics" ON topics FOR SELECT USING (
   EXISTS (SELECT 1 FROM subjects WHERE subjects.id = topics.subject_id AND subjects.user_id = auth.uid())
 );
+DROP POLICY IF EXISTS "Users can view public topics" ON topics;
 CREATE POLICY "Users can view public topics" ON topics FOR SELECT USING (
   EXISTS (SELECT 1 FROM subjects WHERE subjects.id = topics.subject_id AND subjects.is_public = true)
 );
+DROP POLICY IF EXISTS "Users can insert own topics" ON topics;
 CREATE POLICY "Users can insert own topics" ON topics FOR INSERT WITH CHECK (
   EXISTS (SELECT 1 FROM subjects WHERE subjects.id = topics.subject_id AND subjects.user_id = auth.uid())
 );
+DROP POLICY IF EXISTS "Users can update own topics" ON topics;
 CREATE POLICY "Users can update own topics" ON topics FOR UPDATE USING (
   EXISTS (SELECT 1 FROM subjects WHERE subjects.id = topics.subject_id AND subjects.user_id = auth.uid())
 );
+DROP POLICY IF EXISTS "Users can delete own topics" ON topics;
 CREATE POLICY "Users can delete own topics" ON topics FOR DELETE USING (
   EXISTS (SELECT 1 FROM subjects WHERE subjects.id = topics.subject_id AND subjects.user_id = auth.uid())
 );
 
 -- Topic Dependencies policies
+DROP POLICY IF EXISTS "Users can view own dependencies" ON topic_dependencies;
 CREATE POLICY "Users can view own dependencies" ON topic_dependencies FOR SELECT USING (
   EXISTS (SELECT 1 FROM subjects WHERE subjects.id = topic_dependencies.subject_id AND subjects.user_id = auth.uid())
 );
+DROP POLICY IF EXISTS "Users can view public dependencies" ON topic_dependencies;
 CREATE POLICY "Users can view public dependencies" ON topic_dependencies FOR SELECT USING (
   EXISTS (SELECT 1 FROM subjects WHERE subjects.id = topic_dependencies.subject_id AND subjects.is_public = true)
 );
+DROP POLICY IF EXISTS "Users can insert own dependencies" ON topic_dependencies;
 CREATE POLICY "Users can insert own dependencies" ON topic_dependencies FOR INSERT WITH CHECK (
   EXISTS (SELECT 1 FROM subjects WHERE subjects.id = topic_dependencies.subject_id AND subjects.user_id = auth.uid())
 );
+DROP POLICY IF EXISTS "Users can delete own dependencies" ON topic_dependencies;
 CREATE POLICY "Users can delete own dependencies" ON topic_dependencies FOR DELETE USING (
   EXISTS (SELECT 1 FROM subjects WHERE subjects.id = topic_dependencies.subject_id AND subjects.user_id = auth.uid())
 );
 
 -- Study Logs policies (private to user)
+DROP POLICY IF EXISTS "Users can view own logs" ON study_logs;
 CREATE POLICY "Users can view own logs" ON study_logs FOR SELECT USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Users can insert own logs" ON study_logs;
 CREATE POLICY "Users can insert own logs" ON study_logs FOR INSERT WITH CHECK (auth.uid() = user_id);
 
 -- Saved Graph Layouts policies
+DROP POLICY IF EXISTS "Users can view own layouts" ON saved_graph_layouts;
 CREATE POLICY "Users can view own layouts" ON saved_graph_layouts FOR SELECT USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Users can insert own layouts" ON saved_graph_layouts;
 CREATE POLICY "Users can insert own layouts" ON saved_graph_layouts FOR INSERT WITH CHECK (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Users can update own layouts" ON saved_graph_layouts;
 CREATE POLICY "Users can update own layouts" ON saved_graph_layouts FOR UPDATE USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Users can delete own layouts" ON saved_graph_layouts;
 CREATE POLICY "Users can delete own layouts" ON saved_graph_layouts FOR DELETE USING (auth.uid() = user_id);
 
+-- Tutorial variants policies
+DROP POLICY IF EXISTS "Users can view own tutorial variants" ON topic_tutorial_variants;
+CREATE POLICY "Users can view own tutorial variants" ON topic_tutorial_variants FOR SELECT USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Users can insert own tutorial variants" ON topic_tutorial_variants;
+CREATE POLICY "Users can insert own tutorial variants" ON topic_tutorial_variants FOR INSERT WITH CHECK (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Users can update own tutorial variants" ON topic_tutorial_variants;
+CREATE POLICY "Users can update own tutorial variants" ON topic_tutorial_variants FOR UPDATE USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Users can delete own tutorial variants" ON topic_tutorial_variants;
+CREATE POLICY "Users can delete own tutorial variants" ON topic_tutorial_variants FOR DELETE USING (auth.uid() = user_id);
+
 -- Shared Clones policies
+DROP POLICY IF EXISTS "Users can view own clones" ON shared_subject_clones;
 CREATE POLICY "Users can view own clones" ON shared_subject_clones FOR SELECT USING (auth.uid() = cloned_by_user_id);
+DROP POLICY IF EXISTS "Users can insert own clones" ON shared_subject_clones;
 CREATE POLICY "Users can insert own clones" ON shared_subject_clones FOR INSERT WITH CHECK (auth.uid() = cloned_by_user_id);
 
 -- Function to automatically create profile on sign up
@@ -195,14 +254,22 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Triggers for updated_at
+DROP TRIGGER IF EXISTS update_profiles_updated_at ON profiles;
 CREATE TRIGGER update_profiles_updated_at BEFORE UPDATE ON profiles
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS update_subjects_updated_at ON subjects;
 CREATE TRIGGER update_subjects_updated_at BEFORE UPDATE ON subjects
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS update_topics_updated_at ON topics;
 CREATE TRIGGER update_topics_updated_at BEFORE UPDATE ON topics
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS update_layouts_updated_at ON saved_graph_layouts;
 CREATE TRIGGER update_layouts_updated_at BEFORE UPDATE ON saved_graph_layouts
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS update_topic_tutorial_variants_updated_at ON topic_tutorial_variants;
+CREATE TRIGGER update_topic_tutorial_variants_updated_at BEFORE UPDATE ON topic_tutorial_variants
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

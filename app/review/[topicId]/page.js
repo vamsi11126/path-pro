@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useRouter, useParams, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
@@ -18,7 +18,11 @@ import CodeBlock, { cleanCodeContent } from '@/components/sub-components/CodeBlo
 import Flashcard from '@/components/sub-components/Flashcard'
 import DoubtChat from '@/components/sub-components/DoubtChat'
 import MarkdownComponents from '@/components/sub-components/MarkdownComponents'
+import TutorialSessionRenderer from '@/components/tutorial/TutorialSessionRenderer'
+import { fetchTutorialBundle } from '@/lib/tutorials/client'
 
+
+const styleTutorialsEnabled = process.env.NEXT_PUBLIC_ENABLE_STYLE_TUTORIALS !== 'false'
 
 
 const qualityLabels = [
@@ -50,15 +54,34 @@ export default function ReviewPage() {
   const [flashcards, setFlashcards] = useState([])
   const [isFlipped, setIsFlipped] = useState(false)
   const [generating, setGenerating] = useState(false)
+  const [tutorial, setTutorial] = useState(null)
+  const [tutorialLoading, setTutorialLoading] = useState(false)
 
   const supabase = createClient()
 
-  useEffect(() => {
-    loadTopicData()
-    setStartTime(Date.now())
+  const loadTutorial = useCallback(async (targetTopicId = topicId) => {
+    if (!styleTutorialsEnabled || !targetTopicId) return
+
+    setTutorialLoading(true)
+    try {
+      const result = await fetchTutorialBundle({ topicId: targetTopicId })
+      if (result?.tutorial) {
+        setTutorial(result.tutorial)
+      }
+      if (Array.isArray(result?.flashcards) && result.flashcards.length > 0) {
+        setFlashcards(result.flashcards)
+      }
+      if (result?.content) {
+        setTopic((current) => current ? ({ ...current, content: current.content || result.content }) : current)
+      }
+    } catch (error) {
+      console.error('Tutorial load error:', error)
+    } finally {
+      setTutorialLoading(false)
+    }
   }, [topicId])
 
-  const loadTopicData = async () => {
+  const loadTopicData = useCallback(async () => {
     const { data: topicData, error: topicError } = await supabase
       .from('topics')
       .select('*, subjects(*)')
@@ -75,7 +98,15 @@ export default function ReviewPage() {
     setTopic(topicData)
     setSubject(topicData.subjects)
     setLoading(false)
-  }
+    if (styleTutorialsEnabled) {
+      loadTutorial(topicData.id)
+    }
+  }, [loadTutorial, router, supabase, topicId])
+
+  useEffect(() => {
+    loadTopicData()
+    setStartTime(Date.now())
+  }, [loadTopicData, topicId])
 
   const handleSubmitReview = async () => {
     setSubmitting(true)
@@ -103,24 +134,21 @@ export default function ReviewPage() {
      
      if (flashcards.length > 0) return
 
-     setGenerating(true)
-     try {
-         const response = await fetch('/api/generate-topic-flashcards', {
-             method: 'POST',
-             headers: { 'Content-Type': 'application/json' },
-             body: JSON.stringify({
-                 topicId: topic.id,
-                 topicTitle: topic.title,
-                 topicDescription: topic.description,
-                 content: topic.content
-             })
-         })
+      setGenerating(true)
+      try {
+          const response = await fetch('/api/generate-topic-flashcards', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                  topicId: topic.id
+              })
+          })
 
-         const result = await response.json()
+          const result = await response.json()
 
-         if (!response.ok) {
-             throw new Error(result.error || 'Failed to generate flashcards')
-         }
+          if (!response.ok) {
+              throw new Error(result.error || 'Failed to generate flashcards')
+          }
 
          if (result.flashcards && result.flashcards.length > 0) {
              setFlashcards(result.flashcards)
@@ -163,21 +191,21 @@ export default function ReviewPage() {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [showFlashcards, currentCard, flashcards.length])
+  }, [handleNextCard, handlePrevCard, showFlashcards])
 
-  const handleNextCard = () => {
+  const handleNextCard = useCallback(() => {
       setIsFlipped(false)
       setTimeout(() => {
           setCurrentCard(prev => (prev + 1) % flashcards.length)
       }, 150)
-  }
+  }, [flashcards.length])
 
-  const handlePrevCard = () => {
+  const handlePrevCard = useCallback(() => {
       setIsFlipped(false)
       setTimeout(() => {
         setCurrentCard(prev => (prev - 1 + flashcards.length) % flashcards.length)
       }, 150)
-  }
+  }, [flashcards.length])
 
 
   if (loading || !topic) {
@@ -307,6 +335,8 @@ export default function ReviewPage() {
 
 
   const currentQuality = qualityLabels[quality[0]]
+  const renderedContent = tutorial?.tutorialMarkdown || topic.content
+  const hasDetailedContent = Boolean(renderedContent && renderedContent.length > 50)
 
   return (
     <div className="min-h-screen bg-background selection:bg-primary/20 selection:text-primary">
@@ -360,13 +390,26 @@ export default function ReviewPage() {
                         <p className="text-base md:text-lg leading-relaxed m-0 text-muted-foreground">{topic.description}</p>
                     </div>
 
-                  {topic.content && (
+                    {tutorial ? (
+                      <TutorialSessionRenderer
+                        tutorial={tutorial}
+                        learningStyle={tutorial.learningStyle}
+                        mode="review"
+                        className="mb-6 not-prose"
+                      />
+                    ) : tutorialLoading ? (
+                      <div className="mb-6 rounded-xl border border-primary/15 bg-primary/5 p-4 text-sm text-muted-foreground">
+                        Loading your personalized review prompts...
+                      </div>
+                    ) : null}
+
+                  {!tutorial && !tutorialLoading && renderedContent && (
                     <div className="markdown-content prose dark:prose-invert prose-p:text-muted-foreground prose-headings:text-foreground prose-strong:text-primary prose-code:text-primary max-w-none break-words">
                       <ReactMarkdown 
                         remarkPlugins={[remarkGfm, remarkBreaks]}
                         components={MarkdownComponents}
                       >
-                        {sanitizeLatex(topic.content)}
+                        {sanitizeLatex(renderedContent)}
                       </ReactMarkdown>
                     </div>
                   )}
@@ -443,7 +486,7 @@ export default function ReviewPage() {
             topicId={topicId}
             topicTitle={topic.title}
             subjectTitle={subject.title}
-            contentStatus={!!(topic.content && topic.content.length > 50)}
+            contentStatus={hasDetailedContent}
         />
       )}
     </div>

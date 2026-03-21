@@ -11,6 +11,9 @@ import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from 'sonner'
 import { ArrowLeft, User, BookOpen, Briefcase, GraduationCap } from 'lucide-react'
+import { getLearningStyleUiOptions } from '@/lib/learning-styles/recipes'
+
+const learningStyleOptions = getLearningStyleUiOptions()
 
 function ProfilePageFallback() {
   return (
@@ -218,13 +221,25 @@ function ProfilePageContent() {
                         <SelectValue placeholder="Select style" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="Visual">Visual (Images, Diagrams)</SelectItem>
-                        <SelectItem value="Auditory">Auditory (Listening, Discussing)</SelectItem>
-                        <SelectItem value="Reading/Writing">Reading & Writing</SelectItem>
-                        <SelectItem value="Kinesthetic">Kinesthetic (Hands-on)</SelectItem>
-                        <SelectItem value="Project-based">Project-based</SelectItem>
+                        {learningStyleOptions.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
+                    {formData.preferred_learning_style ? (
+                      <div className="rounded-xl border border-white/10 bg-background/40 px-3 py-3 text-sm">
+                        {learningStyleOptions
+                          .filter((option) => option.value === formData.preferred_learning_style)
+                          .map((option) => (
+                            <div key={option.value} className="space-y-1">
+                              <p className="font-medium text-foreground">{option.description}</p>
+                              <p className="text-muted-foreground">{option.preview}</p>
+                            </div>
+                          ))}
+                      </div>
+                    ) : null}
                   </div>
                 </div>
 

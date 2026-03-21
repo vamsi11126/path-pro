@@ -18,6 +18,10 @@ import DoubtChat from '@/components/sub-components/DoubtChat'
 import StickyNoteWidget from '@/components/sub-components/StickyNoteWidget'
 import SelectionHighlighter from '@/components/sub-components/SelectionHighlighter'
 import MarkdownComponents from '@/components/sub-components/MarkdownComponents'
+import TutorialSessionRenderer from '@/components/tutorial/TutorialSessionRenderer'
+import { fetchTutorialBundle } from '@/lib/tutorials/client'
+
+const styleTutorialsEnabled = process.env.NEXT_PUBLIC_ENABLE_STYLE_TUTORIALS !== 'false'
 
 export default function ClassroomLearnPage() {
   const router = useRouter()
@@ -31,6 +35,8 @@ export default function ClassroomLearnPage() {
   const [flashcards, setFlashcards] = useState([])
   const [isFlipped, setIsFlipped] = useState(false)
   const [generating, setGenerating] = useState(false)
+  const [tutorial, setTutorial] = useState(null)
+  const [tutorialLoading, setTutorialLoading] = useState(false)
 
   const startTimeRef = useRef(Date.now())
   const sessionLoggedRef = useRef(false)
@@ -83,10 +89,11 @@ export default function ClassroomLearnPage() {
   const totalSeconds = totalMinutes * 60
   const elapsedSeconds = (progress / 100) * totalSeconds
   const remainingSeconds = Math.max(0, totalSeconds - elapsedSeconds)
+  const hasTutorial = Boolean(tutorial?.tutorialBlocks?.length)
   const hasDetailedContent = Boolean(
-    topic?.content &&
-    topic.content !== topic.description &&
-    topic.content.length > 50
+    (tutorial?.tutorialMarkdown || topic?.content) &&
+    (tutorial?.tutorialMarkdown || topic?.content) !== topic?.description &&
+    (tutorial?.tutorialMarkdown || topic?.content).length > 50
   )
 
   const formatTime = (seconds) => {
@@ -126,6 +133,9 @@ export default function ClassroomLearnPage() {
       setShowFlashcards(false)
       setCourse(payload.classroomCourse)
       setLoading(false)
+      if (styleTutorialsEnabled) {
+        loadTutorial(selectedTopic.id)
+      }
 
       if (selectedTopic.progress?.status === 'available') {
         await fetch(`/api/classrooms/${params.classroomId}/courses/${params.classroomCourseId}/progress`, {
@@ -142,6 +152,32 @@ export default function ClassroomLearnPage() {
       router.push(courseHref)
     }
   }, [courseHref, params.classroomCourseId, params.classroomId, params.topicId, router])
+
+  const loadTutorial = async (targetTopicId = params.topicId) => {
+    if (!styleTutorialsEnabled || !targetTopicId) return
+
+    setTutorialLoading(true)
+    try {
+      const result = await fetchTutorialBundle({
+        topicId: targetTopicId,
+        classroomId: params.classroomId,
+        classroomCourseId: params.classroomCourseId
+      })
+      if (result?.tutorial) {
+        setTutorial(result.tutorial)
+      }
+      if (Array.isArray(result?.flashcards) && result.flashcards.length > 0) {
+        setFlashcards(result.flashcards)
+      }
+      if (result?.content) {
+        setTopic((current) => current ? ({ ...current, content: current.content || result.content }) : current)
+      }
+    } catch (error) {
+      console.error('Classroom tutorial load error:', error)
+    } finally {
+      setTutorialLoading(false)
+    }
+  }
 
   useEffect(() => {
     loadTopicData()
@@ -175,24 +211,11 @@ export default function ClassroomLearnPage() {
     setGenerating(true)
 
     try {
-      const response = await fetch('/api/generate-topic-content', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          topicId: topic.id,
-          subjectTitle: course.subjects?.title,
-          topicTitle: topic.title,
-          topicDescription: topic.description,
-          difficulty: topic.difficulty,
-          classroomId: params.classroomId,
-          classroomCourseId: params.classroomCourseId
-        })
+      const result = await fetchTutorialBundle({
+        topicId: topic.id,
+        classroomId: params.classroomId,
+        classroomCourseId: params.classroomCourseId
       })
-      const result = await response.json()
-
-      if (!response.ok) {
-        throw new Error(result.error || 'Generation failed')
-      }
 
       toast.success('Content generated successfully')
       setTopic((current) => ({
@@ -200,6 +223,10 @@ export default function ClassroomLearnPage() {
         content: result.content,
         hasContent: Boolean(result.content)
       }))
+      setTutorial(result.tutorial || null)
+      if (Array.isArray(result.flashcards) && result.flashcards.length > 0) {
+        setFlashcards(result.flashcards)
+      }
     } catch (error) {
       toast.error('Failed to generate content: ' + error.message)
     } finally {
@@ -311,6 +338,8 @@ export default function ClassroomLearnPage() {
       error: result.error || 'Failed to save notes'
     }
   }
+
+  const renderedContent = tutorial?.tutorialMarkdown || topic?.content
 
   if (loading || !topic || !course) {
     return (
@@ -442,7 +471,7 @@ export default function ClassroomLearnPage() {
         </div>
       </div>
 
-      <div className="container mx-auto px-4 md:px-6 pt-[160px] pb-16 max-w-4xl">
+      <div className="container mx-auto px-4 md:px-6 pt-[160px] pb-16 max-w-6xl">
         <Card className="glass-card mb-8">
           <CardHeader>
             <CardTitle className="text-2xl md:text-3xl font-bold tracking-tight">{topic.title}</CardTitle>
@@ -459,7 +488,15 @@ export default function ClassroomLearnPage() {
               </div>
             )}
 
-            {hasDetailedContent ? (
+            {tutorial ? (
+              <TutorialSessionRenderer
+                tutorial={tutorial}
+                learningStyle={tutorial.learningStyle}
+                className="mb-8 not-prose"
+              />
+            ) : null}
+
+            {!hasTutorial && hasDetailedContent ? (
               <div className="animate-in fade-in slide-in-from-bottom-4 duration-700">
                 <h3 className="text-lg md:text-xl font-semibold mb-6 text-foreground flex items-center gap-2">
                   <Sparkles className="h-5 w-5 text-primary" />
@@ -471,16 +508,16 @@ export default function ClassroomLearnPage() {
                     rehypePlugins={[rehypeKatex]}
                     components={MarkdownComponents}
                   >
-                    {topic.content}
+                    {renderedContent}
                   </ReactMarkdown>
                 </div>
               </div>
             ) : (
               <div className="flex flex-col items-center justify-center py-12 text-muted-foreground bg-white/5 rounded-xl border border-white/5 border-dashed mt-8">
-                {generating ? (
+                {generating || tutorialLoading ? (
                   <div className="flex flex-col items-center animate-pulse">
                     <Sparkles className="h-10 w-10 mb-4 text-primary animate-spin-slow" />
-                    <p>Generating comprehensive guide...</p>
+                    <p>Generating personalized tutorial...</p>
                   </div>
                 ) : (
                   <>
@@ -488,7 +525,7 @@ export default function ClassroomLearnPage() {
                     <p className="mb-4">Detailed content has not been generated for this classroom topic yet.</p>
                     <Button onClick={handleRegenerateContent} variant="outline">
                       <Sparkles className="mr-2 h-4 w-4" />
-                      Generate Detailed Content
+                      Generate Personalized Tutorial
                     </Button>
                   </>
                 )}

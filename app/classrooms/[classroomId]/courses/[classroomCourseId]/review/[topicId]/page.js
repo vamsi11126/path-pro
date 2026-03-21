@@ -17,6 +17,10 @@ import Flashcard from '@/components/sub-components/Flashcard'
 import DoubtChat from '@/components/sub-components/DoubtChat'
 import StickyNoteWidget from '@/components/sub-components/StickyNoteWidget'
 import MarkdownComponents from '@/components/sub-components/MarkdownComponents'
+import TutorialSessionRenderer from '@/components/tutorial/TutorialSessionRenderer'
+import { fetchTutorialBundle } from '@/lib/tutorials/client'
+
+const styleTutorialsEnabled = process.env.NEXT_PUBLIC_ENABLE_STYLE_TUTORIALS !== 'false'
 
 const qualityLabels = [
   { value: 0, label: 'Complete Blackout', description: "I don't remember anything" },
@@ -42,6 +46,8 @@ export default function ClassroomReviewPage() {
   const [flashcards, setFlashcards] = useState([])
   const [isFlipped, setIsFlipped] = useState(false)
   const [generating, setGenerating] = useState(false)
+  const [tutorial, setTutorial] = useState(null)
+  const [tutorialLoading, setTutorialLoading] = useState(false)
 
   const courseHref = `/classrooms/${params.classroomId}/courses/${params.classroomCourseId}`
 
@@ -77,9 +83,38 @@ export default function ClassroomReviewPage() {
       setTopic(selectedTopic)
       setCourse(payload.classroomCourse)
       setLoading(false)
+      if (styleTutorialsEnabled) {
+        loadTutorial(selectedTopic.id)
+      }
     } catch (error) {
       toast.error(error.message)
       router.push(courseHref)
+    }
+  }
+
+  const loadTutorial = async (targetTopicId = params.topicId) => {
+    if (!styleTutorialsEnabled || !targetTopicId) return
+
+    setTutorialLoading(true)
+    try {
+      const result = await fetchTutorialBundle({
+        topicId: targetTopicId,
+        classroomId: params.classroomId,
+        classroomCourseId: params.classroomCourseId
+      })
+      if (result?.tutorial) {
+        setTutorial(result.tutorial)
+      }
+      if (Array.isArray(result?.flashcards) && result.flashcards.length > 0) {
+        setFlashcards(result.flashcards)
+      }
+      if (result?.content) {
+        setTopic((current) => current ? ({ ...current, content: current.content || result.content }) : current)
+      }
+    } catch (error) {
+      console.error('Classroom review tutorial load error:', error)
+    } finally {
+      setTutorialLoading(false)
     }
   }
 
@@ -123,9 +158,6 @@ export default function ClassroomReviewPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           topicId: topic.id,
-          topicTitle: topic.title,
-          topicDescription: topic.description,
-          content: topic.content,
           classroomId: params.classroomId,
           classroomCourseId: params.classroomCourseId
         })
@@ -311,6 +343,8 @@ export default function ClassroomReviewPage() {
   }
 
   const currentQuality = qualityLabels[quality[0]]
+  const renderedContent = tutorial?.tutorialMarkdown || topic?.content
+  const hasDetailedContent = Boolean(renderedContent && renderedContent.length > 50)
 
   return (
     <div className="min-h-screen bg-background">
@@ -362,14 +396,27 @@ export default function ClassroomReviewPage() {
                     <p className="text-base md:text-lg leading-relaxed m-0 text-muted-foreground">{topic.description}</p>
                   </div>
 
-                  {topic.content && (
+                  {tutorial ? (
+                    <TutorialSessionRenderer
+                      tutorial={tutorial}
+                      learningStyle={tutorial.learningStyle}
+                      mode="review"
+                      className="mb-6 not-prose"
+                    />
+                  ) : tutorialLoading ? (
+                    <div className="mb-6 rounded-xl border border-primary/15 bg-primary/5 p-4 text-sm text-muted-foreground">
+                      Loading your personalized review prompts...
+                    </div>
+                  ) : null}
+
+                  {!tutorial && renderedContent && (
                     <div className="markdown-content prose dark:prose-invert max-w-none break-words">
                       <ReactMarkdown
                         remarkPlugins={[remarkGfm, remarkBreaks, remarkMath]}
                         rehypePlugins={[rehypeKatex]}
                         components={MarkdownComponents}
                       >
-                        {topic.content}
+                        {renderedContent}
                       </ReactMarkdown>
                     </div>
                   )}
@@ -438,7 +485,7 @@ export default function ClassroomReviewPage() {
           topicId={params.topicId}
           topicTitle={topic.title}
           subjectTitle={course.subjects?.title}
-          contentStatus={Boolean(topic.content && topic.content.length > 50)}
+          contentStatus={hasDetailedContent}
           classroomId={params.classroomId}
           classroomCourseId={params.classroomCourseId}
         />

@@ -399,7 +399,7 @@ const DiagramLightbox = ({ svg, onClose, isDarkMode, title }) => {
 }
 
 // Mermaid Diagram Component with Lightbox
-const MermaidDiagram = ({ code, allowAddToNotes = true }) => {
+export const MermaidDiagram = ({ code, allowAddToNotes = true }) => {
   const containerRef = useRef(null)
   const uniqueId = useId().replace(/:/g, '-')
   const [svg, setSvg] = useState('')

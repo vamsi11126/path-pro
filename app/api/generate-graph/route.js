@@ -2,6 +2,8 @@ import { createClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
 import { updateUnlockedTopics } from '@/lib/actions'
 import { generateWithGemini } from '@/lib/gemini'
+import { buildLearningStylePromptContext } from '@/lib/learning-styles/recipes'
+import { normalizeLearningStyle } from '@/lib/learning-styles/constants'
 
 function normalizeOptionalText(value) {
   return String(value || '')
@@ -103,14 +105,16 @@ export async function POST(request) {
 
     let personalizationContext = ''
     if (!profileError && userProfile) {
+      const learningStyle = normalizeLearningStyle(userProfile.preferred_learning_style)
       personalizationContext = `
 USER PROFILE (PERSONALIZE THE CURRICULUM FOR THIS USER):
 - Education Level: ${userProfile.education_level || 'Not specified'}
 - Occupation: ${userProfile.occupation || 'Not specified'}
 - Learning Goals: ${userProfile.learning_goals || 'Not specified'}
-- Preferred Learning Style: ${userProfile.preferred_learning_style || 'Not specified'}
+- Preferred Learning Style: ${learningStyle}
 
-INSTRUCTION: Use the user's profile to tailor the difficulty, examples, and progression of the topics. For example, if they are a visual learner, suggest topics that might lend themselves to diagrams (even though you are generating text titles). If they are a beginner, start with very fundamental concepts.
+INSTRUCTION: Use the user's profile to tailor the difficulty, examples, and progression of the topics. Change the curriculum shape, not only the wording.
+${buildLearningStylePromptContext(learningStyle)}
 `
     }
 
